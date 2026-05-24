@@ -26,7 +26,7 @@ def load_race_config(path: Path) -> RaceConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"Race config must be a mapping: {path}")
 
-    return RaceConfig(
+    config = RaceConfig(
         race_id=_required_str(raw, "race_id"),
         name=_required_str(raw, "name"),
         start=_parse_start(_required_mapping(raw, "start")),
@@ -47,6 +47,8 @@ def load_race_config(path: Path) -> RaceConfig:
             for policy_id, policy in _required_mapping(raw, "detection_policies").items()
         },
     )
+    _validate_references(config)
+    return config
 
 
 def load_athletes(path: Path) -> list[AthleteConfig]:
@@ -63,6 +65,35 @@ def load_athletes(path: Path) -> list[AthleteConfig]:
             )
             for row in reader
         ]
+
+
+def _validate_references(config: RaceConfig) -> None:
+    checkpoint_ids = {checkpoint.id for checkpoint in config.checkpoints}
+    policy_ids = set(config.detection_policies)
+
+    if config.start.checkpoint_id not in checkpoint_ids:
+        raise ValueError(
+            f"Unknown checkpoint '{config.start.checkpoint_id}' for race start"
+        )
+
+    for receiver in config.receivers:
+        if receiver.checkpoint_id not in checkpoint_ids:
+            raise ValueError(
+                f"Unknown checkpoint '{receiver.checkpoint_id}' "
+                f"for receiver '{receiver.id}'"
+            )
+
+    for segment in config.route:
+        if segment.checkpoint_id not in checkpoint_ids:
+            raise ValueError(
+                f"Unknown checkpoint '{segment.checkpoint_id}' "
+                f"for route segment '{segment.id}'"
+            )
+        if segment.detection_policy_id not in policy_ids:
+            raise ValueError(
+                f"Unknown detection policy '{segment.detection_policy_id}' "
+                f"for route segment '{segment.id}'"
+            )
 
 
 def _parse_start(raw: dict[str, Any]) -> RaceStartConfig:

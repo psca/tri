@@ -14,7 +14,7 @@ def compile_route(race: RaceConfig) -> list[RouteEvent]:
 
     for index, segment in enumerate(race.route):
         if isinstance(segment, TransitionRouteSegmentConfig):
-            policy = race.detection_policies[segment.detection_policy_id]
+            policy = _get_detection_policy(race, segment.id, segment.detection_policy_id)
             events.append(
                 RouteEvent(
                     index=len(events),
@@ -47,7 +47,7 @@ def _append_sport_events(
     next_segment: object | None,
 ) -> None:
     for lap_number in range(1, segment.laps):
-        policy = race.detection_policies[segment.detection_policy_id]
+        policy = _get_detection_policy(race, segment.id, segment.detection_policy_id)
         events.append(
             RouteEvent(
                 index=len(events),
@@ -71,7 +71,7 @@ def _append_sport_events(
         kind = RouteEventKind.FINISH
         label = "Finish"
 
-    policy = race.detection_policies[segment.detection_policy_id]
+    policy = _get_detection_policy(race, segment.id, segment.detection_policy_id)
     events.append(
         RouteEvent(
             index=len(events),
@@ -85,3 +85,12 @@ def _append_sport_events(
             detection_policy_id=segment.detection_policy_id,
         )
     )
+
+
+def _get_detection_policy(race: RaceConfig, segment_id: str, policy_id: str):
+    try:
+        return race.detection_policies[policy_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown detection policy '{policy_id}' for route segment '{segment_id}'"
+        ) from exc

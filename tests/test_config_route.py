@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+import yaml
+
 from tri_timing.config import load_athletes, load_race_config
 from tri_timing.route import compile_route
 
@@ -40,3 +43,37 @@ def test_compile_route_expands_laps_and_transitions():
     assert events[0].index == 0
     assert events[0].label == "run1 lap 1 complete"
     assert events[0].cooldown_sec == 45
+
+
+def test_load_race_config_rejects_unknown_detection_policy(tmp_path):
+    config_path = _write_modified_race_config(
+        tmp_path,
+        lambda data: data["route"][0].update({"detection_policy_id": "lap_norml"}),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown detection policy 'lap_norml' for route segment 'run1'",
+    ):
+        load_race_config(config_path)
+
+
+def test_load_race_config_rejects_unknown_checkpoint_reference(tmp_path):
+    config_path = _write_modified_race_config(
+        tmp_path,
+        lambda data: data["receivers"][0].update({"checkpoint_id": "missing-gate"}),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown checkpoint 'missing-gate' for receiver 'laptop-dongle-1'",
+    ):
+        load_race_config(config_path)
+
+
+def _write_modified_race_config(tmp_path, modify):
+    data = yaml.safe_load(Path("tests/fixtures/race.yaml").read_text())
+    modify(data)
+    config_path = tmp_path / "race.yaml"
+    config_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return config_path

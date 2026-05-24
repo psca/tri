@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 
@@ -15,6 +16,20 @@ class EventStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._migrate()
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def __enter__(self) -> EventStore:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def _migrate(self) -> None:
         self.conn.executescript(
@@ -65,14 +80,11 @@ class EventStore:
 
     def _next_sequence(self) -> int:
         row = self.conn.execute(
-            "SELECT value FROM sequence_counter WHERE id = 1"
+            "UPDATE sequence_counter SET value = value + 1 WHERE id = 1 RETURNING value"
         ).fetchone()
-        next_value = int(row["value"]) + 1
-        self.conn.execute(
-            "UPDATE sequence_counter SET value = ? WHERE id = 1",
-            (next_value,),
-        )
-        return next_value
+        if row is None:
+            raise RuntimeError("sequence counter is not initialized")
+        return int(row["value"])
 
     def append_raw_detection(
         self,

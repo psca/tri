@@ -123,13 +123,13 @@ class BleDetection:
 
 @dataclass(frozen=True)
 class PassCandidate:
-    athlete_id: str
-    checkpoint_id: str
-    first_seen_ms: int
-    last_seen_ms: int
-    packet_count: int
+    candidate_id: str
+    opened_at_sec: float
+    peak_time_sec: float
+    closed_at_sec: float
     strongest_rssi: int
-    detection_policy_id: str
+    packet_count: int
+    confidence: str
 
 
 @dataclass(frozen=True)

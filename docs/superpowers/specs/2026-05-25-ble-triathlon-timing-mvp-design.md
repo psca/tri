@@ -466,7 +466,7 @@ Cloud can be offline for the whole race. Local export remains official.
 
 In scope:
 
-- Python local race service.
+- Python local race service managed with `uv`.
 - SQLite canonical store.
 - BLE scanner for iBeacon UUID/Major/Minor.
 - RSSI/window pass detector.
@@ -476,7 +476,7 @@ In scope:
 - Local React admin UI.
 - Cloudflare spectator snapshot/event sync.
 - Basic R2/export backup.
-- Post-race replay/export CLI.
+- Post-race replay/export CLI run through `uv`.
 
 Phase 1.5:
 

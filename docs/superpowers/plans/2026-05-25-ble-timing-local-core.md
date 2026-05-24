@@ -6,7 +6,9 @@
 
 **Architecture:** The local Python package is the official timing authority. SQLite is the canonical append-only store; raw detections become pass candidates, and only expected route events advance athlete state. BLE scanner code is isolated behind an adapter so core logic is testable with synthetic detections before hardware arrives.
 
-**Tech Stack:** Python 3.11+, `pytest`, `pydantic`, `PyYAML`, SQLite via stdlib `sqlite3`, optional `bleak` for hardware scanning.
+**Tech Stack:** Python 3.11+, `uv`, `pytest`, `pydantic`, `PyYAML`, SQLite via stdlib `sqlite3`, optional `bleak` for hardware scanning.
+
+**Python tooling:** Use `uv` for dependency sync and command execution. Prefer `uv run pytest ...` and `uv run tri-timing ...` over direct `python -m ...` commands.
 
 ---
 
@@ -61,7 +63,7 @@ def test_package_imports():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_import.py -v`
+Run: `uv run pytest tests/test_import.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'tri_timing'`.
 
@@ -84,7 +86,7 @@ dependencies = [
   "bleak>=0.22",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8.2",
 ]
@@ -110,7 +112,7 @@ __version__ = "0.1.0"
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_import.py -v`
+Run: `uv run pytest tests/test_import.py -v`
 
 Expected: PASS.
 
@@ -253,7 +255,7 @@ def test_compile_route_expands_laps_and_transitions():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_config_route.py -v`
+Run: `uv run pytest tests/test_config_route.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `tri_timing.config`.
 
@@ -482,7 +484,7 @@ def _transition_out_event(index: int, segment: RouteSegment) -> RouteEvent:
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_config_route.py -v`
+Run: `uv run pytest tests/test_config_route.py -v`
 
 Expected: PASS.
 
@@ -564,7 +566,7 @@ def test_append_accepted_event_also_enqueues_sync(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_store.py -v`
+Run: `uv run pytest tests/test_store.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `tri_timing.store`.
 
@@ -756,7 +758,7 @@ class EventStore:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_store.py -v`
+Run: `uv run pytest tests/test_store.py -v`
 
 Expected: PASS.
 
@@ -825,7 +827,7 @@ def test_detector_requires_clear_before_new_candidate():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_detector.py -v`
+Run: `uv run pytest tests/test_detector.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `tri_timing.detector`.
 
@@ -923,7 +925,7 @@ class PassDetector:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_detector.py -v`
+Run: `uv run pytest tests/test_detector.py -v`
 
 Expected: PASS.
 
@@ -1018,7 +1020,7 @@ def test_too_early_lap_is_stored_but_not_advanced():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_engine.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `tri_timing.engine`.
 
@@ -1108,7 +1110,7 @@ class RaceEngine:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_engine.py -v`
+Run: `uv run pytest tests/test_engine.py -v`
 
 Expected: PASS.
 
@@ -1164,7 +1166,7 @@ def test_synthetic_replay_exports_accepted_events(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_cli_replay.py -v`
+Run: `uv run pytest tests/test_cli_replay.py -v`
 
 Expected: FAIL because `tri_timing.cli` does not exist.
 
@@ -1280,13 +1282,13 @@ if __name__ == "__main__":
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_cli_replay.py -v`
+Run: `uv run pytest tests/test_cli_replay.py -v`
 
 Expected: PASS.
 
 - [ ] **Step 6: Run full local-core tests**
 
-Run: `python -m pytest -v`
+Run: `uv run pytest -v`
 
 Expected: all tests PASS.
 
@@ -1317,8 +1319,8 @@ This checklist proves the local Python timing core is ready for admin UI plannin
 ## Required Commands
 
 ```bash
-python -m pytest -v
-python -m tri_timing.cli synthetic-replay \
+uv run pytest -v
+uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \
   --athletes tests/fixtures/athletes.csv \
   --output /tmp/tri-timing-result.json
@@ -1347,8 +1349,8 @@ cat /tmp/tri-timing-result.json
 Run:
 
 ```bash
-python -m pytest -v
-python -m tri_timing.cli synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
+uv run pytest -v
+uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
 cat /tmp/tri-timing-result.json
 ```
 

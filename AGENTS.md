@@ -13,11 +13,12 @@ Keep source files focused by responsibility: config loading, route compilation, 
 
 ## Build, Test, and Development Commands
 
-No executable app exists yet. For the planned Python core, use:
+Python uses `uv` for environment and command execution. For the local core, use:
 
 ```bash
-python -m pytest -v
-python -m tri_timing.cli synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
+uv sync --dev
+uv run pytest -v
+uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
 ```
 
 For docs-only changes, verify links and read the rendered Markdown/HTML locally.
@@ -37,7 +38,7 @@ Avoid putting race-state or timing logic in React. UI should display projections
 
 ## Testing Guidelines
 
-Use `pytest` for Python. Tests should cover replay determinism, start-grace suppression, RSSI pass detection, ordered route advancement, manual correction behavior, and SQLite append-only storage.
+Use `pytest` via `uv run pytest` for Python. Tests should cover replay determinism, start-grace suppression, RSSI pass detection, ordered route advancement, manual correction behavior, and SQLite append-only storage.
 
 Prefer fixture-driven tests using `tests/fixtures/`. Name tests by behavior, e.g. `test_start_grace_blocks_route_advancement`.
 

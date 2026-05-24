@@ -12,8 +12,9 @@ Implemented so far:
 - HTML slide deck summarizing the spec.
 - Local-core implementation plan.
 - Contributor guide.
+- Python package scaffold.
 
-No executable application code exists yet.
+Local core implementation is in progress.
 
 ## Key Documents
 
@@ -44,11 +45,12 @@ Core rules:
 
 ## Planned Local Development
 
-The first implementation target is the Python local core:
+Python uses `uv` for environment and command execution. The first implementation target is the local core:
 
 ```bash
-python -m pytest -v
-python -m tri_timing.cli synthetic-replay \
+uv sync --dev
+uv run pytest -v
+uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \
   --athletes tests/fixtures/athletes.csv \
   --output /tmp/tri-timing-result.json

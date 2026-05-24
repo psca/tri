@@ -12,7 +12,7 @@ dependencies = [
   "bleak>=0.22",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8.2",
 ]

@@ -1,0 +1,60 @@
+race_id: duathlon-demo
+name: Demo Duathlon
+start:
+  mode: mass_button
+  checkpoint_id: gate
+  start_grace_sec: 90
+checkpoints:
+  - id: gate
+    name: Shared Gate
+receivers:
+  - id: laptop-dongle-1
+    checkpoint_id: gate
+route:
+  - id: run1
+    sport: run
+    checkpoint_id: gate
+    laps: 4
+    min_lap_elapsed_sec: 360
+    detection_policy_id: lap_normal
+  - id: t1
+    kind: transition
+    in_event_id: run1_complete_t1_in
+    out_event_id: t1_out_bike_start
+    checkpoint_id: gate
+    min_transition_sec: 30
+    detection_policy_id: transition_strict
+  - id: bike
+    sport: bike
+    checkpoint_id: gate
+    laps: 3
+    min_lap_elapsed_sec: 600
+    detection_policy_id: lap_normal
+  - id: t2
+    kind: transition
+    in_event_id: bike_complete_t2_in
+    out_event_id: t2_out_run2_start
+    checkpoint_id: gate
+    min_transition_sec: 30
+    detection_policy_id: transition_strict
+  - id: run2
+    sport: run
+    checkpoint_id: gate
+    laps: 4
+    min_lap_elapsed_sec: 360
+    detection_policy_id: lap_normal
+detection_policies:
+  lap_normal:
+    strong_rssi_threshold: -70
+    close_rssi_threshold: -82
+    min_packets: 3
+    window_sec: 6
+    clear_sec: 3
+    cooldown_sec: 45
+  transition_strict:
+    strong_rssi_threshold: -62
+    close_rssi_threshold: -78
+    min_packets: 3
+    window_sec: 4
+    clear_sec: 5
+    cooldown_sec: 30

@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
+class RacePhase(StrEnum):
+    PRE_START = "pre_start"
+    ARMED = "armed"
+    LIVE = "live"
+    CLOSED = "closed"
+
+
 class StartMode(StrEnum):
     MASS_BUTTON = "mass_button"
 
@@ -46,7 +53,8 @@ class ReceiverConfig:
 
 
 @dataclass(frozen=True)
-class DetectionPolicyConfig:
+class DetectionPolicy:
+    id: str
     strong_rssi_threshold: int
     close_rssi_threshold: int
     min_packets: int
@@ -88,7 +96,7 @@ class RaceConfig:
     checkpoints: list[CheckpointConfig]
     receivers: list[ReceiverConfig]
     route: list[RouteSegmentConfig]
-    detection_policies: dict[str, DetectionPolicyConfig]
+    detection_policies: dict[str, DetectionPolicy]
 
 
 @dataclass(frozen=True)
@@ -126,12 +134,13 @@ class PassCandidate:
 
 @dataclass(frozen=True)
 class RouteEvent:
+    index: int
     id: str
-    kind: RouteEventKind
+    label: str
     checkpoint_id: str
+    kind: RouteEventKind
+    sport: str | None
+    min_elapsed_sec: int
+    cooldown_sec: int
     detection_policy_id: str
-    segment_id: str
-    sequence: int
-    sport: str | None = None
-    lap_number: int | None = None
-    min_elapsed_sec: int | None = None
+    manual_allowed: bool = True

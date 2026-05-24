@@ -9,7 +9,7 @@ import yaml
 from tri_timing.models import (
     AthleteConfig,
     CheckpointConfig,
-    DetectionPolicyConfig,
+    DetectionPolicy,
     RaceConfig,
     RaceStartConfig,
     ReceiverConfig,
@@ -43,7 +43,7 @@ def load_race_config(path: Path) -> RaceConfig:
         ],
         route=[_parse_route_segment(item) for item in _required_list(raw, "route")],
         detection_policies={
-            policy_id: _parse_detection_policy(policy)
+            policy_id: _parse_detection_policy(policy_id, policy)
             for policy_id, policy in _required_mapping(raw, "detection_policies").items()
         },
     )
@@ -97,11 +97,12 @@ def _parse_route_segment(raw: Any) -> SportRouteSegmentConfig | TransitionRouteS
     )
 
 
-def _parse_detection_policy(raw: Any) -> DetectionPolicyConfig:
+def _parse_detection_policy(policy_id: str, raw: Any) -> DetectionPolicy:
     if not isinstance(raw, dict):
         raise ValueError("Detection policy must be a mapping")
 
-    return DetectionPolicyConfig(
+    return DetectionPolicy(
+        id=policy_id,
         strong_rssi_threshold=_required_int(raw, "strong_rssi_threshold"),
         close_rssi_threshold=_required_int(raw, "close_rssi_threshold"),
         min_packets=_required_int(raw, "min_packets"),

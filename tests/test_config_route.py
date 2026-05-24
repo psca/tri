@@ -10,6 +10,7 @@ def test_loads_race_and_athletes():
 
     assert race.race_id == "duathlon-demo"
     assert race.start.start_grace_sec == 90
+    assert race.detection_policies["lap_normal"].id == "lap_normal"
     assert athletes[0].athlete_id == "A001"
     assert athletes[1].beacon_minor == 2
 
@@ -36,3 +37,6 @@ def test_compile_route_expands_laps_and_transitions():
     assert events[3].detection_policy_id == "lap_normal"
     assert events[4].detection_policy_id == "transition_strict"
     assert events[-1].kind == "finish"
+    assert events[0].index == 0
+    assert events[0].label == "run1 lap 1 complete"
+    assert events[0].cooldown_sec == 45

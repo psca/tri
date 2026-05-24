@@ -14,22 +14,25 @@ def compile_route(race: RaceConfig) -> list[RouteEvent]:
 
     for index, segment in enumerate(race.route):
         if isinstance(segment, TransitionRouteSegmentConfig):
+            policy = race.detection_policies[segment.detection_policy_id]
             events.append(
                 RouteEvent(
+                    index=len(events),
                     id=segment.out_event_id,
-                    kind=RouteEventKind.TRANSITION_OUT,
+                    label=f"{segment.id} out",
                     checkpoint_id=segment.checkpoint_id,
-                    detection_policy_id=segment.detection_policy_id,
-                    segment_id=segment.id,
-                    sequence=len(events),
+                    kind=RouteEventKind.TRANSITION_OUT,
+                    sport=None,
                     min_elapsed_sec=segment.min_transition_sec,
+                    cooldown_sec=policy.cooldown_sec,
+                    detection_policy_id=segment.detection_policy_id,
                 )
             )
             continue
 
         if isinstance(segment, SportRouteSegmentConfig):
             next_segment = race.route[index + 1] if index + 1 < len(race.route) else None
-            _append_sport_events(events, segment, next_segment)
+            _append_sport_events(race, events, segment, next_segment)
             continue
 
         raise TypeError(f"Unsupported route segment: {segment!r}")
@@ -38,42 +41,47 @@ def compile_route(race: RaceConfig) -> list[RouteEvent]:
 
 
 def _append_sport_events(
+    race: RaceConfig,
     events: list[RouteEvent],
     segment: SportRouteSegmentConfig,
     next_segment: object | None,
 ) -> None:
     for lap_number in range(1, segment.laps):
+        policy = race.detection_policies[segment.detection_policy_id]
         events.append(
             RouteEvent(
+                index=len(events),
                 id=f"{segment.id}_lap{lap_number}_complete",
-                kind=RouteEventKind.LAP,
+                label=f"{segment.id} lap {lap_number} complete",
                 checkpoint_id=segment.checkpoint_id,
-                detection_policy_id=segment.detection_policy_id,
-                segment_id=segment.id,
-                sequence=len(events),
+                kind=RouteEventKind.LAP,
                 sport=segment.sport,
-                lap_number=lap_number,
                 min_elapsed_sec=segment.min_lap_elapsed_sec,
+                cooldown_sec=policy.cooldown_sec,
+                detection_policy_id=segment.detection_policy_id,
             )
         )
 
     if isinstance(next_segment, TransitionRouteSegmentConfig):
         event_id = next_segment.in_event_id
         kind = RouteEventKind.TRANSITION_IN
+        label = f"{segment.id} complete / {next_segment.id} in"
     else:
         event_id = "finish"
         kind = RouteEventKind.FINISH
+        label = "Finish"
 
+    policy = race.detection_policies[segment.detection_policy_id]
     events.append(
         RouteEvent(
+            index=len(events),
             id=event_id,
-            kind=kind,
+            label=label,
             checkpoint_id=segment.checkpoint_id,
-            detection_policy_id=segment.detection_policy_id,
-            segment_id=segment.id,
-            sequence=len(events),
+            kind=kind,
             sport=segment.sport,
-            lap_number=segment.laps,
             min_elapsed_sec=segment.min_lap_elapsed_sec,
+            cooldown_sec=policy.cooldown_sec,
+            detection_policy_id=segment.detection_policy_id,
         )
     )

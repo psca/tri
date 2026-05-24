@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BLE Triathlon Timing MVP</title>
+  <style>
+    :root {
+      --ink: #10201c;
+      --muted: #5c6d66;
+      --paper: #fbf4e6;
+      --card: rgba(255, 255, 255, 0.76);
+      --line: rgba(16, 32, 28, 0.16);
+      --orange: #ff6a2a;
+      --teal: #008c7a;
+      --blue: #2364aa;
+      --yellow: #f6c945;
+      --shadow: 0 24px 70px rgba(17, 34, 29, 0.18);
+      --radius: 28px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 10%, rgba(255, 106, 42, 0.30), transparent 28rem),
+        radial-gradient(circle at 78% 18%, rgba(0, 140, 122, 0.26), transparent 30rem),
+        linear-gradient(135deg, #fff8e9 0%, #e9f4ef 55%, #ffe0cf 100%);
+      font-family: "Avenir Next", "Trebuchet MS", Verdana, sans-serif;
+      overflow: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.26;
+      background-image:
+        linear-gradient(rgba(16, 32, 28, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 32, 28, 0.08) 1px, transparent 1px);
+      background-size: 54px 54px;
+      mask-image: radial-gradient(circle at center, black, transparent 78%);
+    }
+
+    .deck {
+      position: relative;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: 5.2vh 6.5vw;
+    }
+
+    .slide.active {
+      display: grid;
+      place-items: center;
+      animation: enter 420ms ease both;
+    }
+
+    @keyframes enter {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.992);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .frame {
+      width: min(1180px, 100%);
+      min-height: min(720px, 86vh);
+      padding: clamp(28px, 4vw, 58px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--card);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .frame::after {
+      content: "";
+      position: absolute;
+      width: 310px;
+      height: 310px;
+      right: -120px;
+      bottom: -130px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 106, 42, 0.18), transparent 70%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      color: var(--teal);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.78rem;
+      font-weight: 800;
+      margin: 0 0 18px;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      letter-spacing: -0.055em;
+      line-height: 0.96;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 800;
+    }
+
+    h1 {
+      max-width: 920px;
+      font-size: clamp(4rem, 9vw, 7.8rem);
+    }
+
+    h2 {
+      max-width: 980px;
+      font-size: clamp(2.8rem, 6.8vw, 5.8rem);
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: clamp(1.1rem, 1.8vw, 1.55rem);
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      color: var(--muted);
+      font-size: clamp(1.1rem, 1.75vw, 1.55rem);
+      line-height: 1.45;
+      max-width: 880px;
+    }
+
+    .lead {
+      margin-top: 28px;
+      font-size: clamp(1.35rem, 2.5vw, 2.05rem);
+      color: #28433b;
+      max-width: 920px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+      margin-top: 34px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.62);
+      padding: 24px;
+    }
+
+    .card strong {
+      display: block;
+      font-size: clamp(1.1rem, 1.7vw, 1.45rem);
+      margin-bottom: 10px;
+    }
+
+    .card span,
+    li {
+      color: var(--muted);
+      font-size: clamp(0.98rem, 1.42vw, 1.25rem);
+      line-height: 1.42;
+    }
+
+    ul {
+      margin: 28px 0 0;
+      padding-left: 1.1rem;
+      max-width: 920px;
+    }
+
+    li + li {
+      margin-top: 12px;
+    }
+
+    .flow {
+      display: grid;
+      gap: 13px;
+      margin-top: 34px;
+      max-width: 980px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .flow div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 17px 20px;
+      border-radius: 18px;
+      background: rgba(16, 32, 28, 0.07);
+      border: 1px solid rgba(16, 32, 28, 0.10);
+      font-weight: 800;
+      font-size: clamp(1rem, 1.6vw, 1.35rem);
+    }
+
+    .flow div::after {
+      content: "->";
+      color: var(--orange);
+      font-weight: 900;
+    }
+
+    .flow div:last-child::after {
+      content: "official";
+      color: var(--teal);
+      font-size: 0.88em;
+    }
+
+    .tagline {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 28px;
+      padding: 12px 16px;
+      border-radius: 999px;
+      background: rgba(0, 140, 122, 0.12);
+      color: var(--teal);
+      font-weight: 800;
+    }
+
+    .columns {
+      display: grid;
+      grid-template-columns: 0.96fr 1.04fr;
+      gap: 40px;
+      align-items: start;
+      margin-top: 34px;
+    }
+
+    .big-number {
+      font-size: clamp(4rem, 8vw, 7rem);
+      line-height: 0.9;
+      color: var(--orange);
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 900;
+    }
+
+    .route {
+      display: grid;
+      gap: 10px;
+      margin-top: 28px;
+      max-width: 900px;
+    }
+
+    .route span {
+      padding: 10px 14px;
+      border-left: 8px solid var(--teal);
+      background: rgba(255, 255, 255, 0.66);
+      border-radius: 12px;
+      color: #28433b;
+      font-weight: 800;
+    }
+
+    .route span.transition {
+      border-left-color: var(--orange);
+    }
+
+    .route span.finish {
+      border-left-color: var(--blue);
+    }
+
+    .control {
+      position: fixed;
+      left: 24px;
+      right: 24px;
+      bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: rgba(16, 32, 28, 0.62);
+      font-size: 0.92rem;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    button {
+      border: 1px solid rgba(16, 32, 28, 0.14);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 800;
+      box-shadow: 0 8px 24px rgba(16, 32, 28, 0.10);
+    }
+
+    .progress {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      height: 5px;
+      width: 100%;
+      background: rgba(16, 32, 28, 0.10);
+      z-index: 11;
+    }
+
+    .bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--teal), var(--orange));
+      transition: width 220ms ease;
+    }
+
+    kbd {
+      border: 1px solid rgba(16, 32, 28, 0.18);
+      border-bottom-width: 2px;
+      border-radius: 8px;
+      padding: 2px 7px;
+      background: rgba(255, 255, 255, 0.72);
+      font-weight: 800;
+    }
+
+    @media (max-width: 780px) {
+      body {
+        overflow: auto;
+      }
+
+      .deck,
+      .slide {
+        min-height: 100vh;
+        height: auto;
+      }
+
+      .slide {
+        padding: 22px;
+      }
+
+      .slide.active {
+        display: block;
+      }
+
+      .frame {
+        min-height: calc(100vh - 80px);
+        padding: 28px;
+      }
+
+      .grid,
+      .grid.three,
+      .columns {
+        grid-template-columns: 1fr;
+      }
+
+      .control {
+        position: sticky;
+        padding: 14px;
+        bottom: 0;
+        background: rgba(251, 244, 230, 0.88);
+        backdrop-filter: blur(12px);
+      }
+    }
+
+    @media print {
+      body {
+        overflow: visible;
+        background: white;
+      }
+
+      body::before,
+      .control,
+      .progress {
+        display: none;
+      }
+
+      .deck {
+        height: auto;
+        width: auto;
+      }
+
+      .slide,
+      .slide.active {
+        position: static;
+        display: block;
+        page-break-after: always;
+        padding: 0;
+      }
+
+      .frame {
+        min-height: 100vh;
+        border: 0;
+        box-shadow: none;
+        border-radius: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active">
+      <div class="frame">
+        <p class="eyebrow">Friendly Race Timing MVP</p>
+        <h1>BLE triathlon timing system</h1>
+        <p class="lead">A local-first, BLE-assisted timing setup for friendly triathlon and duathlon competitions.</p>
+        <div class="tagline">Working hardware + software, not certified chip timing</div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">North Star</p>
+        <h2>Local authority. Cloud spectators.</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>Laptop is official</strong>
+            <span>Scanner, pass detection, route state, manual corrections, and export all run locally.</span>
+          </div>
+          <div class="card">
+            <strong>Cloud is a mirror</strong>
+            <span>Cloudflare shows spectator state and stores backup artifacts. It never corrects local truth.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">MVP Stack</p>
+        <h2>One shared timing gate</h2>
+        <div class="grid three">
+          <div class="card">
+            <strong>Athlete</strong>
+            <span>Configurable iBeacon wristband. Identity comes from UUID + Major + Minor.</span>
+          </div>
+          <div class="card">
+            <strong>Checkpoint</strong>
+            <span>One laptop, one USB BLE dongle, USB extension, local power, phone hotspot.</span>
+          </div>
+          <div class="card">
+            <strong>Ops</strong>
+            <span>Local React admin UI for check-in, live timing, warnings, manual fixes, and export.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Architecture</p>
+        <h2>Data path</h2>
+        <div class="flow">
+          <div>BLE iBeacon wristband</div>
+          <div>USB BLE dongle</div>
+          <div>Python local race service</div>
+          <div>SQLite canonical store</div>
+          <div>React admin UI</div>
+          <div>Queued Cloudflare sync</div>
+          <div>Spectator dashboard + R2 export</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Hard Boundary</p>
+        <h2>BLE detection is evidence, not truth</h2>
+        <div class="flow">
+          <div>raw_packet</div>
+          <div>presence_window</div>
+          <div>pass_candidate</div>
+          <div>route_decision</div>
+          <div>accepted_route_event</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Route Model</p>
+        <h2>Ordered route with laps</h2>
+        <p>Human config compiles into a frozen, versioned list of expected route events. Each athlete advances by one cursor: <strong>next_route_event_index</strong>.</p>
+        <div class="route">
+          <span>run1_lap1_complete</span>
+          <span>run1_lap2_complete</span>
+          <span>run1_lap3_complete</span>
+          <span class="transition">run1_complete_t1_in</span>
+          <span class="transition">t1_out_bike_start</span>
+          <span>bike_lap1_complete</span>
+          <span>bike_lap2_complete</span>
+          <span class="transition">bike_complete_t2_in</span>
+          <span class="finish">finish</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Mass Start</p>
+        <h2>Scanner stays on</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>Before start</strong>
+            <span>Scan and store raw detections. Use pre-race beacon check. No route advancement.</span>
+          </div>
+          <div class="card">
+            <strong>At start</strong>
+            <span>Admin clicks Start. Record race_start_at. Suppress advancement during start_grace.</span>
+          </div>
+          <div class="card">
+            <strong>First event</strong>
+            <span>First expected BLE event is run1_lap1_complete, with min_elapsed_sec protection.</span>
+          </div>
+          <div class="card">
+            <strong>Why</strong>
+            <span>Athletes near the start receiver should not generate false lap events.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Pass Detector</p>
+        <h2>RSSI policies by state</h2>
+        <div class="columns">
+          <div>
+            <div class="big-number">3</div>
+            <p>Lap, transition, and finish events can use different detection policies.</p>
+          </div>
+          <ul>
+            <li>Open candidate when RSSI/window/packet rules pass for current route event.</li>
+            <li>Estimate pass time using strongest RSSI peak_time.</li>
+            <li>Close only after weak/absent signal clear condition.</li>
+            <li>Transitions can require higher RSSI, longer clear, cooldown, and min_transition_sec.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Transitions</p>
+        <h2>Same gate, different meaning</h2>
+        <p>Route expectation decides whether a pass means lap complete, T1 entry, bike start, T2 entry, run start, or finish.</p>
+        <div class="grid">
+          <div class="card">
+            <strong>Boundary events</strong>
+            <span>run1_complete_t1_in, t1_out_bike_start, bike_complete_t2_in, t2_out_run2_start.</span>
+          </div>
+          <div class="card">
+            <strong>Auto only if distinct</strong>
+            <span>Transition out needs prior transition in, min_transition_sec, clear condition, and new RSSI peak.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Storage</p>
+        <h2>SQLite is canonical</h2>
+        <div class="grid">
+          <div class="card">
+            <strong>Append-only facts</strong>
+            <span>raw_detections, pass_candidates, accepted_route_events, manual_corrections, config_snapshots, sync_outbox.</span>
+          </div>
+          <div class="card">
+            <strong>Disposable projections</strong>
+            <span>current_athlete_states, leaderboard_snapshot, receiver_health_current.</span>
+          </div>
+          <div class="card">
+            <strong>Ordering</strong>
+            <span>local_sequence_number is primary. Wall clock is display/export data.</span>
+          </div>
+          <div class="card">
+            <strong>Exports</strong>
+            <span>JSONL and R2 are derived from committed SQLite ranges.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Manual Adjudication</p>
+        <h2>Corrections are events</h2>
+        <p>No in-place edits to official facts. Manual changes append compensating correction events.</p>
+        <div class="grid three">
+          <div class="card"><strong>Add</strong><span>insert_pass, reassign_beacon, manual timestamp.</span></div>
+          <div class="card"><strong>Change</strong><span>override_time, invalidate_pass, mark corrected.</span></div>
+          <div class="card"><strong>Status</strong><span>mark_dns, mark_dnf, mark_dq, lock results.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Cloud Sync</p>
+        <h2>One-way and idempotent</h2>
+        <ul>
+          <li>Local service sends confirmed events, corrections, snapshots, and freshness.</li>
+          <li>Each outbox item has idempotency_key and payload_hash.</li>
+          <li>Duplicate same key/hash is OK. Same key/different hash is integrity error.</li>
+          <li>D1 is spectator read model. R2 stores exports/bundles. KV is cache only.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Admin UI</p>
+        <h2>Operator console, not race builder</h2>
+        <div class="grid">
+          <div class="card"><strong>Before race</strong><span>Setup/check-in, beacon scan, duplicate/missing/weak warnings, calibration result.</span></div>
+          <div class="card"><strong>During race</strong><span>Race control, live state, receiver health, candidates, warnings, manual correction.</span></div>
+          <div class="card"><strong>After race</strong><span>Review unresolved items, lock results, export CSV/JSON, sync status.</span></div>
+          <div class="card"><strong>Always visible</strong><span>Scanner healthy, DB writing, last packet, scan rate, disk, sync age.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Calibration</p>
+        <h2>Trial run decides confidence</h2>
+        <div class="columns">
+          <div>
+            <div class="big-number">10dB</div>
+            <p>Target useful contrast between gate RSSI peak and transition/rack background.</p>
+          </div>
+          <ul>
+            <li>Use actual laptop, dongle, wristbands, gate, and athlete placement.</li>
+            <li>Measure missed reads, duplicate reads, latency, and strongest-RSSI timing.</li>
+            <li>Test walking, running, group passes, wrist orientation, and shared gate transitions.</li>
+            <li>If contrast is poor, use manual-assisted mode for affected events.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">MVP Scope</p>
+        <h2>Build this first</h2>
+        <div class="grid three">
+          <div class="card"><strong>Local core</strong><span>Python scanner, SQLite store, pass detector, route state.</span></div>
+          <div class="card"><strong>Operator UI</strong><span>React admin, live state, warnings, manual corrections, export.</span></div>
+          <div class="card"><strong>Spectator mirror</strong><span>Cloudflare snapshots/events, stale-sync indicator, basic public view.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Not MVP</p>
+        <h2>Defer complexity</h2>
+        <ul>
+          <li>Phone-as-beacon timing.</li>
+          <li>Certified chip timing claims.</li>
+          <li>Cloud-authoritative admin.</li>
+          <li>Distributed multi-checkpoint merge.</li>
+          <li>Graph/branching route model.</li>
+          <li>Full visual route/setup builder.</li>
+          <li>Automatic transition precision when RSSI contrast is poor.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Friendly Race Fallbacks</p>
+        <h2>If it fails, compare manually</h2>
+        <div class="grid">
+          <div class="card"><strong>Always local</strong><span>Cloud can be offline for the whole race. Local export remains official.</span></div>
+          <div class="card"><strong>Manual tools</strong><span>Add pass, invalidate pass, override time, reassign beacon, mark DNF/DQ.</span></div>
+          <div class="card"><strong>Simple backup</strong><span>Optional paper bib sheet and phone video aimed at the gate.</span></div>
+          <div class="card"><strong>Expectation</strong><span>Good enough for friendly timing, not exact finish-line adjudication.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Next Step</p>
+        <h2>Implementation plan</h2>
+        <p class="lead">After spec approval, plan the build in phases: calibration spike, local core, operator UI, race simulation, cloud spectator sync, then hardening.</p>
+        <div class="tagline">Spec source: 2026-05-25 BLE Triathlon Timing MVP Design</div>
+      </div>
+    </section>
+  </main>
+
+  <div class="control">
+    <div>
+      <span id="counter">1 / 18</span>
+      <span> - use <kbd>Left</kbd> / <kbd>Right</kbd> or buttons</span>
+    </div>
+    <div class="buttons">
+      <button type="button" id="prev">Prev</button>
+      <button type="button" id="next">Next</button>
+    </div>
+  </div>
+  <div class="progress"><div class="bar" id="bar"></div></div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    const bar = document.getElementById("bar");
+    const prev = document.getElementById("prev");
+    const next = document.getElementById("next");
+    let index = 0;
+
+    function show(nextIndex) {
+      index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle("active", slideIndex === index);
+      });
+      counter.textContent = `${index + 1} / ${slides.length}`;
+      bar.style.width = `${((index + 1) / slides.length) * 100}%`;
+      location.hash = `slide-${index + 1}`;
+    }
+
+    prev.addEventListener("click", () => show(index - 1));
+    next.addEventListener("click", () => show(index + 1));
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        show(index + 1);
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        show(index - 1);
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        show(0);
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        show(slides.length - 1);
+      }
+    });
+
+    const match = location.hash.match(/slide-(\d+)/);
+    if (match) {
+      show(Number(match[1]) - 1);
+    } else {
+      show(0);
+    }
+  </script>
+</body>
+</html>

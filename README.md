@@ -2,7 +2,7 @@
 
 BLE-assisted timing system for friendly triathlon and duathlon competitions.
 
-The current implementation is a local-first Python timing core in a monorepo layout. The intended MVP uses configurable iBeacon wristbands, a laptop with a USB BLE dongle as the race authority, and later Cloudflare sync for a read-only spectator dashboard and backup storage.
+The current implementation is a local-first timing system in a monorepo layout. The intended MVP uses configurable iBeacon wristbands, a laptop with a USB BLE dongle as the race authority, local admin controls, and Cloudflare sync for a read-only spectator dashboard and backup storage.
 
 ## Current Status
 
@@ -22,13 +22,17 @@ Implemented so far:
 - Scanner adapter boundary and synthetic replay CLI.
 - Local FastAPI service runtime adapter.
 - Local React/Vite admin shell.
+- Retrying cloud sync publisher for accepted timing facts.
+- Cloudflare Worker spectator API with authenticated ingest, D1 migrations, and public read endpoints.
 
 ## Key Documents
 
 - [MVP design spec](docs/specs/2026-05-25-ble-triathlon-timing-mvp-design.md)
 - [HTML slide deck](docs/specs/2026-05-25-ble-triathlon-timing-mvp-slides.html)
 - [Local-core implementation plan](docs/plans/2026-05-25-ble-timing-local-core.md)
+- [Cloud spectator sync implementation plan](docs/plans/2026-05-25-cloud-spectator-sync.md)
 - [Local-core acceptance checklist](docs/acceptance/local-core.md)
+- [Cloud spectator acceptance checklist](docs/acceptance/cloud-spectator.md)
 - [Contributor guide](AGENTS.md)
 
 ## Repository Layout
@@ -37,6 +41,7 @@ Implemented so far:
 apps/
   local-core/      Python timing authority, tests, and CLI
   admin/           Local React admin shell
+  cloud-spectator/ Cloudflare Worker, D1 migrations, and spectator API tests
 docs/
   specs/           Design specs and slide decks
   plans/           Implementation plans
@@ -51,8 +56,8 @@ BLE iBeacon wristband
   -> Python local race service
   -> SQLite canonical store
   -> local React admin UI
-  -> queued Cloudflare sync
-  -> spectator dashboard / R2 backup
+  -> retrying Cloudflare sync
+  -> D1 spectator read model / R2 backup
 ```
 
 Core rules:
@@ -60,7 +65,8 @@ Core rules:
 - Local Python service is the official timing authority.
 - `tri_timing` is the pure timing library; `tri_timing_service` is the local FastAPI runtime adapter.
 - SQLite is canonical.
-- Cloudflare is read-only/spectator for MVP.
+- Cloudflare is read-only/spectator for MVP, with D1 as a derived read model.
+- Cloud sync must be idempotent and must not block local race timing.
 - BLE detections are evidence, not timing facts.
 - Route advancement and manual corrections are append-only facts.
 
@@ -93,6 +99,16 @@ npm install
 npm run dev
 npm test
 npm run build
+```
+
+Cloud spectator commands run from `apps/cloud-spectator`:
+
+```bash
+cd apps/cloud-spectator
+npm install
+npm test -- --run
+npm run typecheck
+npm run dev
 ```
 
 ## Branches

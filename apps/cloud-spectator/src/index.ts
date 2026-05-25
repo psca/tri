@@ -4,7 +4,15 @@ import type { Env } from "./types";
 
 function matchRacePath(pathname: string, suffix: "events" | "state"): string | null {
   const match = pathname.match(new RegExp(`^/api/races/([^/]+)/${suffix}$`));
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 export default {

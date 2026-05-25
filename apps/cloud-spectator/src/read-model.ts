@@ -11,9 +11,10 @@ export interface AcceptedRouteEventPayload {
 
 export type RaceEvent = Omit<AcceptedRouteEventPayload, "type">;
 
-export type RaceState = Record<string, unknown> & {
+export interface RaceState {
   updated_at: string;
-};
+  state: unknown;
+}
 
 export interface SyncEnvelope {
   idempotency_key: string;
@@ -207,10 +208,5 @@ export async function getRaceState(db: D1Database, raceId: string): Promise<Race
     return null;
   }
 
-  const snapshot: unknown = JSON.parse(row.snapshot_json);
-  if (isRecord(snapshot)) {
-    return { ...snapshot, updated_at: row.updated_at };
-  }
-
-  return { snapshot, updated_at: row.updated_at };
+  return { updated_at: row.updated_at, state: JSON.parse(row.snapshot_json) };
 }

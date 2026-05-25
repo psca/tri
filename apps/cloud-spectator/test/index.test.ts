@@ -303,9 +303,37 @@ describe("public spectator APIs", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       updated_at: "2026-05-25T09:05:00Z",
-      phase: "race",
-      athletes: [{ athlete_id: "A001", current_event: "run1_lap1_complete" }],
+      state: {
+        phase: "race",
+        athletes: [{ athlete_id: "A001", current_event: "run1_lap1_complete" }],
+      },
     });
+  });
+
+  it("returns JSON 404 for malformed percent-encoded race routes", async () => {
+    let prepareCalls = 0;
+    const db = {
+      prepare() {
+        prepareCalls += 1;
+        return {
+          bind() {
+            return {
+              all: async () => ({ results: [] }),
+              first: async () => null,
+            };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/races/%E0%A4%A/events"),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not_found" });
+    expect(prepareCalls).toBe(0);
   });
 
   it("returns 404 when race state does not exist", async () => {

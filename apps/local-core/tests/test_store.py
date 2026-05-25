@@ -221,7 +221,7 @@ def test_pending_sync_outbox_filters_retryable_failures_by_next_attempt(tmp_path
     ]
 
 
-def test_pending_sync_outbox_includes_retryable_failure_without_next_attempt(tmp_path):
+def test_pending_sync_outbox_excludes_retryable_failure_without_next_attempt(tmp_path):
     store = EventStore(tmp_path / "race.sqlite")
     sequence = store.append_accepted_route_event(
         race_id="duathlon-001",
@@ -237,7 +237,60 @@ def test_pending_sync_outbox_includes_retryable_failure_without_next_attempt(tmp
 
     rows = store.pending_sync_outbox(limit=10, now="2026-05-25T09:05:00+00:00")
 
-    assert [row["local_sequence_number"] for row in rows] == [sequence]
+    assert [row["local_sequence_number"] for row in rows] == []
+
+
+def test_pending_sync_outbox_includes_retryable_failure_only_after_due_time(tmp_path):
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    store.mark_sync_failure(
+        sequence,
+        error="temporary outage",
+        next_attempt_at="2026-05-25T09:05:00+00:00",
+    )
+
+    assert store.pending_sync_outbox(
+        limit=10,
+        now="2026-05-25T09:04:59+00:00",
+    ) == []
+    assert [
+        row["local_sequence_number"]
+        for row in store.pending_sync_outbox(
+            limit=10,
+            now="2026-05-25T09:05:00+00:00",
+        )
+    ] == [sequence]
+
+
+def test_mark_sync_permanent_failure_removes_row_from_pending_retry(tmp_path):
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    store.mark_sync_permanent_failure(sequence, error="HTTP 409: duplicate key")
+
+    assert store.pending_sync_outbox(limit=10) == []
+    row = store.sync_outbox()[0]
+    assert row["status"] == "failed_permanent"
+    assert row["attempts"] == 1
+    assert row["last_error"] == "HTTP 409: duplicate key"
+    assert row["next_attempt_at"] is None
 
 
 def test_context_manager_closes_store(tmp_path):

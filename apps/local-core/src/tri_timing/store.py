@@ -237,7 +237,7 @@ class EventStore:
             WHERE status = 'pending'
                OR (
                  status = 'failed_retryable'
-                 AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                 AND next_attempt_at <= ?
                )
             ORDER BY local_sequence_number
             LIMIT ?
@@ -276,6 +276,26 @@ class EventStore:
                   AND status IN ('pending', 'failed_retryable', 'in_flight')
                 """,
                 (error, next_attempt_at, local_sequence_number),
+            )
+
+    def mark_sync_permanent_failure(
+        self,
+        local_sequence_number: int,
+        *,
+        error: str,
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE sync_outbox
+                SET status = 'failed_permanent',
+                    attempts = attempts + 1,
+                    last_error = ?,
+                    next_attempt_at = NULL
+                WHERE local_sequence_number = ?
+                  AND status IN ('pending', 'failed_retryable', 'in_flight')
+                """,
+                (error, local_sequence_number),
             )
 
     def set_metadata(self, key: str, value: str) -> None:

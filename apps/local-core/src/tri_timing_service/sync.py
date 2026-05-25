@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Callable
 
 import httpx
 
@@ -24,11 +24,13 @@ class SyncPublisher:
         endpoint: str,
         token: str,
         transport: httpx.AsyncBaseTransport | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store = store
         self._endpoint = endpoint
         self._token = token
         self._transport = transport
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     async def publish_once(self, *, limit: int = 10) -> PublishResult:
         rows = self._store.pending_sync_outbox(limit=limit)
@@ -48,7 +50,7 @@ class SyncPublisher:
                     self._store.mark_sync_failure(
                         sequence,
                         error=str(exc),
-                        next_attempt_at=None,
+                        next_attempt_at=self._next_attempt_at(row),
                     )
                     failed += 1
                     continue
@@ -56,16 +58,20 @@ class SyncPublisher:
                 if response.status_code in {200, 201, 202}:
                     self._store.mark_sync_success(
                         sequence,
-                        synced_at=datetime.now(UTC).isoformat(),
+                        synced_at=self._clock().isoformat(),
                     )
                     uploaded += 1
                     continue
 
-                self._store.mark_sync_failure(
-                    sequence,
-                    error=f"HTTP {response.status_code}: {response.text[:200]}",
-                    next_attempt_at=None,
-                )
+                error = f"HTTP {response.status_code}: {response.text[:200]}"
+                if self._is_retryable_status(response.status_code):
+                    self._store.mark_sync_failure(
+                        sequence,
+                        error=error,
+                        next_attempt_at=self._next_attempt_at(row),
+                    )
+                else:
+                    self._store.mark_sync_permanent_failure(sequence, error=error)
                 failed += 1
 
         return PublishResult(uploaded=uploaded, failed=failed)
@@ -78,6 +84,14 @@ class SyncPublisher:
             "race_id": payload["race_id"],
             "local_sequence_number": row["local_sequence_number"],
             "type": payload["type"],
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": self._clock().isoformat(),
             "payload": payload,
         }
+
+    def _next_attempt_at(self, row: dict[str, Any]) -> str:
+        attempts = int(row["attempts"])
+        delay = timedelta(seconds=60 * (2**attempts))
+        return (self._clock() + delay).isoformat()
+
+    def _is_retryable_status(self, status_code: int) -> bool:
+        return status_code in {408, 425, 429} or 500 <= status_code <= 599

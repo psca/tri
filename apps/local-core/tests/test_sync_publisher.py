@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 
 import httpx
 
@@ -66,6 +67,7 @@ def test_sync_publisher_marks_retryable_failure(tmp_path) -> None:
         endpoint="https://example.test/api/ingest",
         token="secret",
         transport=httpx.MockTransport(handler),
+        clock=lambda: datetime(2026, 5, 25, 9, 0, 0, tzinfo=UTC),
     )
 
     result = asyncio.run(publisher.publish_once())
@@ -77,3 +79,82 @@ def test_sync_publisher_marks_retryable_failure(tmp_path) -> None:
     assert row["status"] == "failed_retryable"
     assert row["attempts"] == 1
     assert row["last_error"].startswith("HTTP 503:")
+    assert row["next_attempt_at"] == "2026-05-25T09:01:00+00:00"
+
+
+def test_sync_publisher_marks_conflict_permanent_failure(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"error": "duplicate idempotency key"})
+
+    publisher = SyncPublisher(
+        store=store,
+        endpoint="https://example.test/api/ingest",
+        token="secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = asyncio.run(publisher.publish_once())
+
+    assert result.uploaded == 0
+    assert result.failed == 1
+    assert store.pending_sync_outbox(limit=10) == []
+    row = store.sync_outbox()[0]
+    assert row["local_sequence_number"] == sequence
+    assert row["status"] == "failed_permanent"
+    assert row["attempts"] == 1
+    assert row["last_error"].startswith("HTTP 409:")
+
+
+def test_sync_publisher_schedules_network_failure_retry_after_backoff(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network unavailable", request=request)
+
+    publisher = SyncPublisher(
+        store=store,
+        endpoint="https://example.test/api/ingest",
+        token="secret",
+        transport=httpx.MockTransport(handler),
+        clock=lambda: datetime(2026, 5, 25, 9, 0, 0, tzinfo=UTC),
+    )
+
+    result = asyncio.run(publisher.publish_once())
+
+    assert result.uploaded == 0
+    assert result.failed == 1
+    row = store.sync_outbox()[0]
+    assert row["status"] == "failed_retryable"
+    assert row["attempts"] == 1
+    assert row["next_attempt_at"] == "2026-05-25T09:01:00+00:00"
+    assert store.pending_sync_outbox(
+        limit=10,
+        now="2026-05-25T09:00:59+00:00",
+    ) == []
+    assert [
+        row["local_sequence_number"]
+        for row in store.pending_sync_outbox(
+            limit=10,
+            now="2026-05-25T09:01:00+00:00",
+        )
+    ] == [sequence]

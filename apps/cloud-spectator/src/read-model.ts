@@ -9,6 +9,12 @@ export interface AcceptedRouteEventPayload {
   confidence: string;
 }
 
+export type RaceEvent = Omit<AcceptedRouteEventPayload, "type">;
+
+export type RaceState = Record<string, unknown> & {
+  updated_at: string;
+};
+
 export interface SyncEnvelope {
   idempotency_key: string;
   payload_hash: string;
@@ -178,4 +184,33 @@ export async function projectEnvelope(
   }
 
   return "accepted";
+}
+
+export async function listRaceEvents(db: D1Database, raceId: string): Promise<RaceEvent[]> {
+  const result = await db
+    .prepare(
+      "SELECT race_id, local_sequence_number, athlete_id, route_event_id, checkpoint_id, event_time_wall, confidence FROM accepted_route_events WHERE race_id = ? ORDER BY local_sequence_number",
+    )
+    .bind(raceId)
+    .all<RaceEvent>();
+
+  return result.results ?? [];
+}
+
+export async function getRaceState(db: D1Database, raceId: string): Promise<RaceState | null> {
+  const row = await db
+    .prepare("SELECT updated_at, snapshot_json FROM races WHERE race_id = ?")
+    .bind(raceId)
+    .first<{ updated_at: string; snapshot_json: string }>();
+
+  if (!row) {
+    return null;
+  }
+
+  const snapshot: unknown = JSON.parse(row.snapshot_json);
+  if (isRecord(snapshot)) {
+    return { ...snapshot, updated_at: row.updated_at };
+  }
+
+  return { snapshot, updated_at: row.updated_at };
 }

@@ -1,5 +1,11 @@
 import { handleIngest } from "./ingest";
+import { getRaceState, listRaceEvents } from "./read-model";
 import type { Env } from "./types";
+
+function matchRacePath(pathname: string, suffix: "events" | "state"): string | null {
+  const match = pathname.match(new RegExp(`^/api/races/([^/]+)/${suffix}$`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -9,6 +15,21 @@ export default {
     }
     if (url.pathname === "/api/ingest" && request.method === "POST") {
       return handleIngest(request, env);
+    }
+    if (request.method === "GET") {
+      const eventsRaceId = matchRacePath(url.pathname, "events");
+      if (eventsRaceId) {
+        return Response.json({ events: await listRaceEvents(env.DB, eventsRaceId) });
+      }
+
+      const stateRaceId = matchRacePath(url.pathname, "state");
+      if (stateRaceId) {
+        const state = await getRaceState(env.DB, stateRaceId);
+        if (!state) {
+          return Response.json({ error: "not_found" }, { status: 404 });
+        }
+        return Response.json(state);
+      }
     }
     return Response.json({ error: "not_found" }, { status: 404 });
   },

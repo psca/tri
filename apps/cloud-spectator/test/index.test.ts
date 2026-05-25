@@ -206,3 +206,127 @@ describe("ingest", () => {
     expect(prepareCalls).toBe(0);
   });
 });
+
+describe("public spectator APIs", () => {
+  it("returns race events ordered by local sequence number", async () => {
+    const db = {
+      prepare(sql: string) {
+        expect(sql).toContain("ORDER BY local_sequence_number");
+        return {
+          bind(raceId: string) {
+            expect(raceId).toBe("duathlon-001");
+            return {
+              all: async () => ({
+                results: [
+                  {
+                    race_id: "duathlon-001",
+                    local_sequence_number: 1,
+                    athlete_id: "A001",
+                    route_event_id: "run1_lap1_complete",
+                    checkpoint_id: "gate",
+                    event_time_wall: "2026-05-25T09:00:00Z",
+                    confidence: "high",
+                  },
+                  {
+                    race_id: "duathlon-001",
+                    local_sequence_number: 2,
+                    athlete_id: "A002",
+                    route_event_id: "run1_lap1_complete",
+                    checkpoint_id: "gate",
+                    event_time_wall: "2026-05-25T09:00:03Z",
+                    confidence: "medium",
+                  },
+                ],
+              }),
+            };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/races/duathlon-001/events"),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      events: [
+        {
+          race_id: "duathlon-001",
+          local_sequence_number: 1,
+          athlete_id: "A001",
+          route_event_id: "run1_lap1_complete",
+          checkpoint_id: "gate",
+          event_time_wall: "2026-05-25T09:00:00Z",
+          confidence: "high",
+        },
+        {
+          race_id: "duathlon-001",
+          local_sequence_number: 2,
+          athlete_id: "A002",
+          route_event_id: "run1_lap1_complete",
+          checkpoint_id: "gate",
+          event_time_wall: "2026-05-25T09:00:03Z",
+          confidence: "medium",
+        },
+      ],
+    });
+  });
+
+  it("returns latest race state snapshot with updated_at", async () => {
+    const db = {
+      prepare(sql: string) {
+        expect(sql).toContain("FROM races");
+        return {
+          bind(raceId: string) {
+            expect(raceId).toBe("duathlon-001");
+            return {
+              first: async () => ({
+                updated_at: "2026-05-25T09:05:00Z",
+                snapshot_json: JSON.stringify({
+                  phase: "race",
+                  athletes: [{ athlete_id: "A001", current_event: "run1_lap1_complete" }],
+                }),
+              }),
+            };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/races/duathlon-001/state"),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      updated_at: "2026-05-25T09:05:00Z",
+      phase: "race",
+      athletes: [{ athlete_id: "A001", current_event: "run1_lap1_complete" }],
+    });
+  });
+
+  it("returns 404 when race state does not exist", async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => null,
+            };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/races/missing/state"),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "not_found" });
+  });
+});

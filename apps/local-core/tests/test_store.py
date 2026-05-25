@@ -145,6 +145,101 @@ def test_sync_outbox_rows_can_be_marked_synced(tmp_path) -> None:
     assert row["synced_at"] == "2026-05-25T09:00:05+00:00"
 
 
+def test_mark_sync_failure_does_not_regress_synced_row(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    store.mark_sync_success(sequence, synced_at="2026-05-25T09:00:05+00:00")
+    store.mark_sync_failure(
+        sequence,
+        error="late worker timeout",
+        next_attempt_at="2026-05-25T09:05:00+00:00",
+    )
+
+    row = store.sync_outbox()[0]
+    assert row["status"] == "synced"
+    assert row["attempts"] == 0
+    assert row["last_error"] is None
+    assert row["next_attempt_at"] is None
+    assert row["synced_at"] == "2026-05-25T09:00:05+00:00"
+
+
+def test_pending_sync_outbox_filters_retryable_failures_by_next_attempt(tmp_path):
+    store = EventStore(tmp_path / "race.sqlite")
+    pending_sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+    due_sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A002",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-2",
+        event_time_wall="2026-05-25T09:01:00+00:00",
+        confidence="high",
+    )
+    not_due_sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A003",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-3",
+        event_time_wall="2026-05-25T09:02:00+00:00",
+        confidence="high",
+    )
+
+    store.mark_sync_failure(
+        due_sequence,
+        error="temporary outage",
+        next_attempt_at="2026-05-25T09:04:59+00:00",
+    )
+    store.mark_sync_failure(
+        not_due_sequence,
+        error="rate limited",
+        next_attempt_at="2026-05-25T09:05:01+00:00",
+    )
+
+    rows = store.pending_sync_outbox(limit=10, now="2026-05-25T09:05:00+00:00")
+
+    assert [row["local_sequence_number"] for row in rows] == [
+        pending_sequence,
+        due_sequence,
+    ]
+
+
+def test_pending_sync_outbox_includes_retryable_failure_without_next_attempt(tmp_path):
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    store.mark_sync_failure(sequence, error="temporary outage", next_attempt_at=None)
+
+    rows = store.pending_sync_outbox(limit=10, now="2026-05-25T09:05:00+00:00")
+
+    assert [row["local_sequence_number"] for row in rows] == [sequence]
+
+
 def test_context_manager_closes_store(tmp_path):
     with EventStore(tmp_path / "race.db") as store:
         assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1

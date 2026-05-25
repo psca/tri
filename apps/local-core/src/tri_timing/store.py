@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -224,15 +225,24 @@ class EventStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def pending_sync_outbox(self, *, limit: int) -> list[dict[str, Any]]:
+    def pending_sync_outbox(
+        self, *, limit: int, now: str | None = None
+    ) -> list[dict[str, Any]]:
+        if now is None:
+            now = datetime.now(UTC).isoformat()
+
         rows = self.conn.execute(
             """
             SELECT * FROM sync_outbox
-            WHERE status IN ('pending', 'failed_retryable')
+            WHERE status = 'pending'
+               OR (
+                 status = 'failed_retryable'
+                 AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+               )
             ORDER BY local_sequence_number
             LIMIT ?
             """,
-            (limit,),
+            (now, limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -263,6 +273,7 @@ class EventStore:
                     last_error = ?,
                     next_attempt_at = ?
                 WHERE local_sequence_number = ?
+                  AND status IN ('pending', 'failed_retryable', 'in_flight')
                 """,
                 (error, next_attempt_at, local_sequence_number),
             )

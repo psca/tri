@@ -104,6 +104,27 @@ export function parseSyncEnvelope(value: unknown): SyncEnvelope {
   return envelope;
 }
 
+async function resolveFailedInsert(
+  db: D1Database,
+  envelope: SyncEnvelope,
+  cause: unknown,
+): Promise<"duplicate"> {
+  const existing = await db
+    .prepare("SELECT payload_hash FROM sync_items WHERE idempotency_key = ?")
+    .bind(envelope.idempotency_key)
+    .first<{ payload_hash: string }>();
+
+  if (!existing) {
+    throw cause;
+  }
+
+  if (existing.payload_hash !== envelope.payload_hash) {
+    throw new IdempotencyKeyConflictError();
+  }
+
+  return "duplicate";
+}
+
 export async function projectEnvelope(
   db: D1Database,
   envelope: SyncEnvelope,
@@ -112,19 +133,7 @@ export async function projectEnvelope(
     validateAcceptedRouteEventPayload(envelope);
   }
 
-  const existing = await db
-    .prepare("SELECT payload_hash FROM sync_items WHERE idempotency_key = ?")
-    .bind(envelope.idempotency_key)
-    .first<{ payload_hash: string }>();
-
-  if (existing) {
-    if (existing.payload_hash !== envelope.payload_hash) {
-      throw new IdempotencyKeyConflictError();
-    }
-    return "duplicate";
-  }
-
-  await db
+  const syncItemStatement = db
     .prepare(
       "INSERT INTO sync_items (idempotency_key, race_id, local_sequence_number, type, payload_hash, received_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -135,12 +144,11 @@ export async function projectEnvelope(
       envelope.type,
       envelope.payload_hash,
       new Date().toISOString(),
-    )
-    .run();
+    );
 
   if (envelope.type === "accepted_route_event") {
     const payload = envelope.payload;
-    await db
+    const projectionStatement = db
       .prepare(
         "INSERT INTO accepted_route_events (race_id, local_sequence_number, athlete_id, route_event_id, checkpoint_id, event_time_wall, confidence) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
@@ -152,8 +160,21 @@ export async function projectEnvelope(
         payload.checkpoint_id,
         payload.event_time_wall,
         payload.confidence,
-      )
-      .run();
+      );
+
+    try {
+      await db.batch([syncItemStatement, projectionStatement]);
+    } catch (error) {
+      return resolveFailedInsert(db, envelope, error);
+    }
+
+    return "accepted";
+  }
+
+  try {
+    await syncItemStatement.run();
+  } catch (error) {
+    return resolveFailedInsert(db, envelope, error);
   }
 
   return "accepted";

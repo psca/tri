@@ -41,16 +41,17 @@ describe("ingest", () => {
 
   it("accepts valid bearer auth", async () => {
     const db = {
-      prepare() {
+      prepare(sql: string) {
         return {
           bind() {
             return {
-              first: async () => null,
-              run: async () => ({ success: true }),
+              sql,
+              toString: () => sql,
             };
           },
         };
       },
+      batch: async () => [{ success: true }, { success: true }],
     } as unknown as D1Database;
 
     const response = await worker.fetch(
@@ -67,21 +68,28 @@ describe("ingest", () => {
 
   it("accepts accepted_route_event and makes duplicate retries safe", async () => {
     const statements: string[] = [];
-    let firstCalls = 0;
+    let batchCalls = 0;
     const db = {
       prepare(sql: string) {
         statements.push(sql);
         return {
           bind() {
             return {
+              toString: () => sql,
               first: async () => {
-                firstCalls += 1;
-                return firstCalls === 1 ? null : { payload_hash: "abc" };
+                return { payload_hash: "abc" };
               },
-              run: async () => ({ success: true }),
             };
           },
         };
+      },
+      batch: async (batchStatements: D1PreparedStatement[]) => {
+        batchCalls += 1;
+        statements.push(...batchStatements.map((statement) => String(statement)));
+        if (batchCalls === 1) {
+          return [{ success: true }, { success: true }];
+        }
+        throw new Error("D1_ERROR: UNIQUE constraint failed: sync_items.idempotency_key");
       },
     } as unknown as D1Database;
 
@@ -110,10 +118,12 @@ describe("ingest", () => {
           bind() {
             return {
               first: async () => ({ payload_hash: "different" }),
-              run: async () => ({ success: true }),
             };
           },
         };
+      },
+      batch: async () => {
+        throw new Error("D1_ERROR: UNIQUE constraint failed: sync_items.idempotency_key");
       },
     } as unknown as D1Database;
 
@@ -128,6 +138,42 @@ describe("ingest", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "idempotency_key_conflict" });
+  });
+
+  it("does not leave sync metadata when accepted_route_event projection batch fails", async () => {
+    let firstCalls = 0;
+    let batchCalls = 0;
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => {
+                firstCalls += 1;
+                return null;
+              },
+            };
+          },
+        };
+      },
+      batch: async () => {
+        batchCalls += 1;
+        throw new Error("projection insert failed");
+      },
+    } as unknown as D1Database;
+
+    const request = () =>
+      new Request("https://example.test/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+        body: JSON.stringify(acceptedRouteEventEnvelope),
+      });
+
+    await expect(worker.fetch(request(), envWith(db))).rejects.toThrow("projection insert failed");
+    await expect(worker.fetch(request(), envWith(db))).rejects.toThrow("projection insert failed");
+
+    expect(batchCalls).toBe(2);
+    expect(firstCalls).toBe(2);
   });
 
   it("rejects invalid envelopes before writing bad rows", async () => {

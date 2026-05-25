@@ -262,8 +262,11 @@ class EventStore:
         local_sequence_number: int,
         *,
         error: str,
-        next_attempt_at: str | None,
+        next_attempt_at: str,
     ) -> None:
+        if next_attempt_at is None:
+            raise ValueError("next_attempt_at is required for retryable sync failures")
+
         with self.conn:
             self.conn.execute(
                 """

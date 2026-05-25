@@ -185,3 +185,12 @@ def test_synthetic_detection_unknown_athlete_returns_400(tmp_path) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "unknown athlete: UNKNOWN"
+
+
+def test_sse_stream_opens(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        with client.stream("GET", "/api/events/stream") as response:
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")

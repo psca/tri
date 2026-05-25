@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
+from tri_timing_service.broadcaster import EventBroadcaster
 from tri_timing_service.models import SyntheticDetectionRequest
 from tri_timing_service.runtime import RaceRuntime
 from tri_timing_service.settings import ServiceSettings
@@ -14,6 +16,7 @@ def create_app(
     database_path: Path | None = None,
 ) -> FastAPI:
     service_settings = settings or ServiceSettings.for_tests()
+    broadcaster = EventBroadcaster()
     runtime: RaceRuntime | None = None
 
     def get_runtime() -> RaceRuntime:
@@ -39,6 +42,13 @@ def create_app(
     @app.get("/api/health")
     async def health() -> dict[str, bool]:
         return {"ok": True}
+
+    @app.get("/api/events/stream")
+    async def event_stream():
+        return StreamingResponse(
+            broadcaster.initial_stream(),
+            media_type="text/event-stream",
+        )
 
     @app.get("/api/race/state")
     async def race_state():

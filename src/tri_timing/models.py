@@ -144,3 +144,19 @@ class RouteEvent:
     cooldown_sec: int
     detection_policy_id: str
     manual_allowed: bool = True
+
+
+@dataclass
+class AthleteState:
+    athlete_id: str
+    next_route_event_index: int = 0
+    last_event_time_sec: float | None = None
+    status: str = "racing"
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    status: str
+    reason: str | None
+    route_event_id: str | None
+    event_time_sec: float | None

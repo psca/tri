@@ -16,6 +16,7 @@ from tri_timing_service.models import (
     SyntheticDetectionRequest,
 )
 from tri_timing_service.settings import ServiceSettings
+from tri_timing_service.sync import SyncPublisher
 
 
 class RaceRuntime:
@@ -208,6 +209,21 @@ class RaceRuntime:
 
     def shutdown(self) -> None:
         self._store.close()
+
+    async def publish_cloud_sync_once(self) -> int:
+        if (
+            self._settings.cloud_sync_endpoint is None
+            or self._settings.cloud_sync_token is None
+        ):
+            return 0
+
+        publisher = SyncPublisher(
+            store=self._store,
+            endpoint=self._settings.cloud_sync_endpoint,
+            token=self._settings.cloud_sync_token,
+        )
+        result = await publisher.publish_once()
+        return result.uploaded
 
     def _hydrate_engine_from_store(self) -> None:
         for row in self._store.accepted_route_events():

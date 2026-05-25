@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -14,6 +15,15 @@ def test_service_settings_defaults_to_fixture_paths() -> None:
     assert settings.race_config_path == Path("tests/fixtures/race.yaml")
     assert settings.athletes_path == Path("tests/fixtures/athletes.csv")
     assert settings.database_path.name == "tri-timing-test.sqlite"
+    assert settings.cloud_sync_endpoint is None
+    assert settings.cloud_sync_token is None
+
+
+def test_service_settings_can_disable_cloud_sync() -> None:
+    settings = ServiceSettings.for_tests()
+
+    assert settings.cloud_sync_endpoint is None
+    assert settings.cloud_sync_token is None
 
 
 def test_runtime_starts_in_pre_start_phase(tmp_path) -> None:
@@ -173,3 +183,44 @@ def test_runtime_shutdown_closes_event_store(tmp_path) -> None:
 
     with pytest.raises(sqlite3.ProgrammingError):
         runtime.state()
+
+
+def test_runtime_cloud_sync_returns_zero_when_not_configured(tmp_path) -> None:
+    settings = ServiceSettings.for_tests()
+    runtime = RaceRuntime.create(settings, database_path=tmp_path / "race.sqlite")
+
+    uploaded = asyncio.run(runtime.publish_cloud_sync_once())
+
+    assert uploaded == 0
+
+
+def test_runtime_cloud_sync_uses_configured_publisher(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    class FakePublisher:
+        def __init__(self, *, store, endpoint, token) -> None:
+            calls.append((store, endpoint, token))
+
+        async def publish_once(self):
+            return type("PublishResult", (), {"uploaded": 3})()
+
+    settings = ServiceSettings(
+        race_config_path=Path("tests/fixtures/race.yaml"),
+        athletes_path=Path("tests/fixtures/athletes.csv"),
+        database_path=tmp_path / "race.sqlite",
+        cloud_sync_endpoint="https://example.test/api/ingest",
+        cloud_sync_token="secret",
+    )
+    runtime = RaceRuntime.create(settings)
+    monkeypatch.setattr("tri_timing_service.runtime.SyncPublisher", FakePublisher)
+
+    uploaded = asyncio.run(runtime.publish_cloud_sync_once())
+
+    assert uploaded == 3
+    assert calls == [
+        (
+            runtime._store,
+            "https://example.test/api/ingest",
+            "secret",
+        )
+    ]

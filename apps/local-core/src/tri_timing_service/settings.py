@@ -8,6 +8,8 @@ class ServiceSettings:
     race_config_path: Path
     athletes_path: Path
     database_path: Path
+    cloud_sync_endpoint: str | None = None
+    cloud_sync_token: str | None = None
 
     @classmethod
     def for_tests(cls) -> "ServiceSettings":

@@ -1,0 +1,98 @@
+:root {
+  color: #16231f;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(227, 91, 49, 0.22), transparent 26rem),
+    linear-gradient(135deg, #f5ead7 0%, #d8e5d4 52%, #f7c978 100%);
+  font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  background: #0d5c4f;
+  box-shadow: 0 10px 22px rgba(13, 92, 79, 0.2);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.75rem 1rem;
+}
+
+button:hover {
+  background: #0a493f;
+}
+
+.shell {
+  display: grid;
+  gap: 1rem;
+  margin: 0 auto;
+  max-width: 960px;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.hero,
+.panel {
+  background: rgba(255, 252, 246, 0.78);
+  border: 1px solid rgba(22, 35, 31, 0.14);
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(64, 53, 40, 0.12);
+  padding: 1.5rem;
+}
+
+.hero {
+  align-self: end;
+}
+
+.hero h1 {
+  font-size: clamp(2.25rem, 6vw, 4.75rem);
+  letter-spacing: -0.06em;
+  line-height: 0.95;
+  margin: 0 0 1rem;
+}
+
+.eyebrow {
+  color: #9a4325;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.controls,
+.athlete {
+  display: flex;
+  gap: 1rem;
+}
+
+.controls {
+  flex-wrap: wrap;
+}
+
+.athlete {
+  align-items: center;
+  border-top: 1px solid rgba(22, 35, 31, 0.1);
+  justify-content: space-between;
+  padding: 1rem 0;
+}
+
+.athlete span {
+  color: #596862;
+  display: block;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 1rem;
+  }
+
+  .athlete {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

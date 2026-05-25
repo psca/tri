@@ -23,3 +23,12 @@ class RaceStateView(BaseModel):
     athletes: list[AthleteView]
     accepted_events: list[AcceptedEventView]
     warnings: list[str]
+
+
+class SyntheticDetectionRequest(BaseModel):
+    athlete_id: str
+    checkpoint_id: str
+    receiver_id: str = "synthetic"
+    rssi: int = -55
+    repeat_count: int = 6
+    timestamp_sec: float | None = None

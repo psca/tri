@@ -1,11 +1,18 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tri_timing.config import load_athletes, load_race_config
+from tri_timing.detector import PassDetector
 from tri_timing.engine import RaceEngine
 from tri_timing.models import RouteEventKind
 from tri_timing.route import compile_route
 from tri_timing.store import EventStore
-from tri_timing_service.models import AcceptedEventView, AthleteView, RaceStateView
+from tri_timing_service.models import (
+    AcceptedEventView,
+    AthleteView,
+    RaceStateView,
+    SyntheticDetectionRequest,
+)
 from tri_timing_service.settings import ServiceSettings
 
 
@@ -82,6 +89,97 @@ class RaceRuntime:
 
     def close(self) -> RaceStateView:
         self._phase = "closed"
+        return self.state()
+
+    def synthetic_detection(self, request: SyntheticDetectionRequest) -> RaceStateView:
+        athlete = next(
+            (
+                athlete
+                for athlete in self._athletes
+                if athlete.athlete_id == request.athlete_id
+            ),
+            None,
+        )
+        if athlete is None:
+            raise ValueError(f"unknown athlete: {request.athlete_id}")
+
+        checkpoint_ids = {checkpoint.id for checkpoint in self._race_config.checkpoints}
+        if request.checkpoint_id not in checkpoint_ids:
+            raise ValueError(f"unknown checkpoint: {request.checkpoint_id}")
+
+        if self._phase != "live":
+            return self.state()
+
+        engine_state = self._engine.state_for(request.athlete_id)
+        if engine_state.next_route_event_index >= len(self._route):
+            return self.state()
+
+        expected_event = self._route[engine_state.next_route_event_index]
+        policy = self._race_config.detection_policies[
+            expected_event.detection_policy_id
+        ]
+        detector = PassDetector(policy)
+        timestamp_sec = request.timestamp_sec
+        if timestamp_sec is None:
+            baseline = (
+                engine_state.last_event_time_sec
+                or self._engine.race_start_sec
+                or 100
+            )
+            timestamp_sec = (
+                baseline
+                + expected_event.min_elapsed_sec
+                + self._race_config.start.start_grace_sec
+                + 1
+            )
+
+        candidate = None
+        wall_time = datetime.now(tz=UTC).isoformat()
+        samples = [
+            (timestamp_sec + index, request.rssi)
+            for index in range(request.repeat_count)
+        ]
+        samples.append(
+            (
+                timestamp_sec + request.repeat_count + policy.clear_sec,
+                policy.close_rssi_threshold,
+            )
+        )
+
+        for sample_time, rssi in samples:
+            self._store.append_raw_detection(
+                race_id=self._race_config.race_id,
+                receiver_id=request.receiver_id,
+                checkpoint_id=request.checkpoint_id,
+                beacon_uuid=athlete.beacon_uuid,
+                beacon_major=athlete.beacon_major,
+                beacon_minor=athlete.beacon_minor,
+                rssi=rssi,
+                timestamp_wall=wall_time,
+                timestamp_monotonic=sample_time,
+                process_instance_id="synthetic",
+            )
+            candidate = (
+                detector.observe(timestamp_sec=sample_time, rssi=rssi) or candidate
+            )
+
+        if candidate is not None:
+            decision = self._engine.apply_pass(
+                request.athlete_id,
+                request.checkpoint_id,
+                candidate,
+            )
+            if decision.status == "accepted" and decision.route_event_id is not None:
+                self._store.append_accepted_route_event(
+                    race_id=self._race_config.race_id,
+                    athlete_id=request.athlete_id,
+                    route_event_id=decision.route_event_id,
+                    checkpoint_id=request.checkpoint_id,
+                    pass_candidate_id=candidate.candidate_id,
+                    event_time_wall=wall_time,
+                    confidence=candidate.confidence,
+                )
+
         return self.state()
 
     def shutdown(self) -> None:

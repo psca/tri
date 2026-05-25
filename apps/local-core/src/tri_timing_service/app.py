@@ -2,8 +2,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
+from tri_timing_service.models import SyntheticDetectionRequest
 from tri_timing_service.runtime import RaceRuntime
 from tri_timing_service.settings import ServiceSettings
 
@@ -50,5 +51,12 @@ def create_app(
     @app.post("/api/race/close")
     async def close_race():
         return get_runtime().close()
+
+    @app.post("/api/synthetic/detection")
+    async def synthetic_detection(request: SyntheticDetectionRequest):
+        try:
+            return get_runtime().synthetic_detection(request)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     return app

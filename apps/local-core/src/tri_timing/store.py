@@ -84,6 +84,14 @@ class EventStore:
         )
         self._ensure_column("sync_outbox", "synced_at", "synced_at TEXT")
         self._ensure_column("sync_outbox", "next_attempt_at", "next_attempt_at TEXT")
+        self.conn.execute(
+            """
+            UPDATE sync_outbox
+            SET next_attempt_at = '1970-01-01T00:00:00+00:00'
+            WHERE status = 'failed_retryable'
+              AND next_attempt_at IS NULL
+            """
+        )
         self.conn.commit()
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:

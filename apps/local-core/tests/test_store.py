@@ -276,6 +276,59 @@ def test_pending_sync_outbox_includes_retryable_failure_only_after_due_time(tmp_
     ] == [sequence]
 
 
+def test_migration_repairs_legacy_retryable_failure_without_next_attempt(tmp_path):
+    db_path = tmp_path / "race.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE sync_outbox (
+          local_sequence_number INTEGER PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          payload_hash TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO sync_outbox (
+          local_sequence_number, idempotency_key, payload_hash, payload_json,
+          status, attempts, last_error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            7,
+            "duathlon-001:7",
+            "hash",
+            '{"type": "accepted_route_event"}',
+            "failed_retryable",
+            2,
+            "temporary outage",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    store = EventStore(db_path)
+
+    try:
+        rows = store.pending_sync_outbox(
+            limit=10,
+            now="2026-05-25T09:05:00+00:00",
+        )
+        outbox_row = store.sync_outbox()[0]
+
+        assert [row["local_sequence_number"] for row in rows] == [7]
+        assert outbox_row["status"] == "failed_retryable"
+        assert outbox_row["next_attempt_at"] == "1970-01-01T00:00:00+00:00"
+        assert outbox_row["last_error"] == "temporary outage"
+    finally:
+        store.close()
+
+
 def test_mark_sync_permanent_failure_removes_row_from_pending_retry(tmp_path):
     store = EventStore(tmp_path / "race.sqlite")
     sequence = store.append_accepted_route_event(

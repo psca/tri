@@ -23,6 +23,19 @@ cd apps/local-core
 uv sync --dev
 uv run pytest -v
 uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
+uv run uvicorn tri_timing_service.app:create_app --factory --reload
+```
+
+Local service commands run from `apps/local-core`.
+
+Admin UI commands run from `apps/admin`:
+
+```bash
+cd apps/admin
+npm install
+npm run dev
+npm test
+npm run build
 ```
 
 For docs-only changes, verify links and read the rendered Markdown/HTML locally.
@@ -62,4 +75,4 @@ Pull requests should include a summary, test evidence, affected docs/specs, and 
 
 ## Architecture Notes
 
-The local Python service is the official timing authority. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP. BLE detections are evidence; accepted route events and manual corrections are append-only facts.
+The local Python service is the official timing authority. `tri_timing` is library code, and `tri_timing_service` is the local FastAPI runtime adapter. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP. BLE detections are evidence; accepted route events and manual corrections are append-only facts.

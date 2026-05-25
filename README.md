@@ -20,6 +20,8 @@ Implemented so far:
 - RSSI pass detector with cooldown/stale-window handling.
 - Race engine for start grace, expected route advancement, duplicate suppression, and finish state.
 - Scanner adapter boundary and synthetic replay CLI.
+- Local FastAPI service runtime adapter.
+- Local React/Vite admin shell.
 
 ## Key Documents
 
@@ -34,6 +36,7 @@ Implemented so far:
 ```text
 apps/
   local-core/      Python timing authority, tests, and CLI
+  admin/           Local React admin shell
 docs/
   specs/           Design specs and slide decks
   plans/           Implementation plans
@@ -55,6 +58,7 @@ BLE iBeacon wristband
 Core rules:
 
 - Local Python service is the official timing authority.
+- `tri_timing` is the pure timing library; `tri_timing_service` is the local FastAPI runtime adapter.
 - SQLite is canonical.
 - Cloudflare is read-only/spectator for MVP.
 - BLE detections are evidence, not timing facts.
@@ -72,12 +76,23 @@ uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \
   --athletes tests/fixtures/athletes.csv \
   --output /tmp/tri-timing-result.json
+uv run uvicorn tri_timing_service.app:create_app --factory --reload
 ```
 
 Expected replay output:
 
 ```text
 accepted 1 route event
+```
+
+Admin UI commands run from `apps/admin`:
+
+```bash
+cd apps/admin
+npm install
+npm run dev
+npm test
+npm run build
 ```
 
 ## Branches

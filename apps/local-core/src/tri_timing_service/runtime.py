@@ -2,6 +2,7 @@ from pathlib import Path
 
 from tri_timing.config import load_athletes, load_race_config
 from tri_timing.engine import RaceEngine
+from tri_timing.models import RouteEventKind
 from tri_timing.route import compile_route
 from tri_timing.store import EventStore
 from tri_timing_service.models import AcceptedEventView, AthleteView, RaceStateView
@@ -21,6 +22,7 @@ class RaceRuntime:
         )
         for athlete in self._athletes:
             self._engine.add_athlete(athlete.athlete_id)
+        self._hydrate_engine_from_store()
         self._phase = "pre_start"
 
     @classmethod
@@ -70,7 +72,7 @@ class RaceRuntime:
         )
 
     def start(self) -> RaceStateView:
-        if self._phase != "closed":
+        if self._phase == "pre_start":
             self._phase = "live"
             self._engine.start(
                 race_start_sec=100,
@@ -81,3 +83,27 @@ class RaceRuntime:
     def close(self) -> RaceStateView:
         self._phase = "closed"
         return self.state()
+
+    def shutdown(self) -> None:
+        self._store.close()
+
+    def _hydrate_engine_from_store(self) -> None:
+        for row in self._store.accepted_route_events():
+            if row["race_id"] != self._race_config.race_id:
+                continue
+
+            try:
+                state = self._engine.state_for(row["athlete_id"])
+            except KeyError:
+                continue
+
+            if state.next_route_event_index >= len(self._route):
+                continue
+
+            expected = self._route[state.next_route_event_index]
+            if row["route_event_id"] != expected.id:
+                continue
+
+            state.next_route_event_index += 1
+            if expected.kind == RouteEventKind.FINISH or expected.kind == "finish":
+                state.status = "finished"

@@ -64,14 +64,14 @@ class SyncPublisher:
                     continue
 
                 error = f"HTTP {response.status_code}: {response.text[:200]}"
-                if self._is_retryable_status(response.status_code):
+                if response.status_code == 409:
+                    self._store.mark_sync_permanent_failure(sequence, error=error)
+                else:
                     self._store.mark_sync_failure(
                         sequence,
                         error=error,
                         next_attempt_at=self._next_attempt_at(row),
                     )
-                else:
-                    self._store.mark_sync_permanent_failure(sequence, error=error)
                 failed += 1
 
         return PublishResult(uploaded=uploaded, failed=failed)

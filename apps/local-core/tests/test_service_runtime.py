@@ -26,6 +26,24 @@ def test_service_settings_can_disable_cloud_sync() -> None:
     assert settings.cloud_sync_token is None
 
 
+def test_service_settings_loads_cloud_sync_from_env(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TRI_RACE_CONFIG", str(tmp_path / "race.yaml"))
+    monkeypatch.setenv("TRI_ATHLETES", str(tmp_path / "athletes.csv"))
+    monkeypatch.setenv("TRI_DATABASE", str(tmp_path / "race.sqlite"))
+    monkeypatch.setenv("TRI_CLOUD_SYNC_ENDPOINT", "https://example.test/api/ingest")
+    monkeypatch.setenv("TRI_CLOUD_SYNC_TOKEN", "secret")
+    monkeypatch.setenv("TRI_CLOUD_SYNC_INTERVAL_SEC", "0.25")
+
+    settings = ServiceSettings.from_env()
+
+    assert settings.race_config_path == tmp_path / "race.yaml"
+    assert settings.athletes_path == tmp_path / "athletes.csv"
+    assert settings.database_path == tmp_path / "race.sqlite"
+    assert settings.cloud_sync_endpoint == "https://example.test/api/ingest"
+    assert settings.cloud_sync_token == "secret"
+    assert settings.cloud_sync_interval_sec == 0.25
+
+
 def test_runtime_starts_in_pre_start_phase(tmp_path) -> None:
     settings = ServiceSettings.for_tests()
     runtime = RaceRuntime.create(settings, database_path=tmp_path / "race.sqlite")

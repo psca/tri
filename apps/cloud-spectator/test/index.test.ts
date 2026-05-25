@@ -20,6 +20,43 @@ const acceptedRouteEventEnvelope = {
     confidence: "high",
   },
 };
+const acceptedRouteEventPayloadJson = JSON.stringify(acceptedRouteEventEnvelope.payload);
+
+const raceStateEnvelope = {
+  idempotency_key: "duathlon-001:43",
+  payload_hash: "state-hash",
+  race_id: "duathlon-001",
+  local_sequence_number: 43,
+  type: "race_state_snapshot",
+  created_at: "2026-05-25T09:05:00Z",
+  payload: {
+    type: "race_state_snapshot",
+    race_id: "duathlon-001",
+    name: "Demo Duathlon",
+    phase: "live",
+    generated_at: "2026-05-25T09:05:00Z",
+    state: { phase: "live", athletes: [{ athlete_id: "A001" }] },
+  },
+};
+
+const receiverHealthEnvelope = {
+  idempotency_key: "duathlon-001:44",
+  payload_hash: "receiver-hash",
+  race_id: "duathlon-001",
+  local_sequence_number: 44,
+  type: "receiver_health_snapshot",
+  created_at: "2026-05-25T09:05:01Z",
+  payload: {
+    type: "receiver_health_snapshot",
+    race_id: "duathlon-001",
+    receiver_id: "rx-1",
+    checkpoint_id: "gate",
+    status: "online",
+    last_packet_at: "2026-05-25T09:05:00Z",
+    packet_rate: 3.5,
+    updated_at: "2026-05-25T09:05:01Z",
+  },
+};
 
 function envWith(db: D1Database): Env {
   return {
@@ -77,7 +114,7 @@ describe("ingest", () => {
             return {
               toString: () => sql,
               first: async () => {
-                return { payload_hash: "abc" };
+                return { payload_hash: "abc", payload_json: acceptedRouteEventPayloadJson };
               },
             };
           },
@@ -138,6 +175,92 @@ describe("ingest", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "idempotency_key_conflict" });
+  });
+
+  it("rejects duplicate idempotency keys with same hash but different payload", async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              first: async () => ({
+                payload_hash: "abc",
+                payload_json: JSON.stringify({ different: true }),
+              }),
+            };
+          },
+        };
+      },
+      batch: async () => {
+        throw new Error("D1_ERROR: UNIQUE constraint failed: sync_items.idempotency_key");
+      },
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+        body: JSON.stringify(acceptedRouteEventEnvelope),
+      }),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "idempotency_key_conflict" });
+  });
+
+  it("projects race_state_snapshot into races", async () => {
+    const statements: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql);
+        return {
+          bind() {
+            return { toString: () => sql };
+          },
+        };
+      },
+      batch: async () => [{ success: true }, { success: true }],
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+        body: JSON.stringify(raceStateEnvelope),
+      }),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(202);
+    expect(statements.some((sql) => sql.includes("INSERT INTO races"))).toBe(true);
+  });
+
+  it("projects receiver_health_snapshot into receiver_health", async () => {
+    const statements: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        statements.push(sql);
+        return {
+          bind() {
+            return { toString: () => sql };
+          },
+        };
+      },
+      batch: async () => [{ success: true }, { success: true }],
+    } as unknown as D1Database;
+
+    const response = await worker.fetch(
+      new Request("https://example.test/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer secret" },
+        body: JSON.stringify(receiverHealthEnvelope),
+      }),
+      envWith(db),
+    );
+
+    expect(response.status).toBe(202);
+    expect(statements.some((sql) => sql.includes("INSERT INTO receiver_health"))).toBe(true);
   });
 
   it("does not leave sync metadata when accepted_route_event projection batch fails", async () => {

@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS sync_items (
   local_sequence_number INTEGER NOT NULL,
   type TEXT NOT NULL,
   payload_hash TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
   received_at TEXT NOT NULL
 );
 

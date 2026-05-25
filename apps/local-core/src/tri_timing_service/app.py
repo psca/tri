@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,9 +16,10 @@ def create_app(
     settings: ServiceSettings | None = None,
     database_path: Path | None = None,
 ) -> FastAPI:
-    service_settings = settings or ServiceSettings.for_tests()
+    service_settings = settings or ServiceSettings.from_env()
     broadcaster = EventBroadcaster()
     runtime: RaceRuntime | None = None
+    sync_task: asyncio.Task[None] | None = None
 
     def get_runtime() -> RaceRuntime:
         if runtime is None:
@@ -26,18 +28,33 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        nonlocal runtime
+        nonlocal runtime, sync_task
         runtime = RaceRuntime.create(service_settings, database_path=database_path)
         app.state.runtime = runtime
+        sync_task = asyncio.create_task(_cloud_sync_loop())
         try:
             yield
         finally:
+            if sync_task is not None:
+                sync_task.cancel()
+                try:
+                    await sync_task
+                except asyncio.CancelledError:
+                    pass
+                sync_task = None
             if runtime is not None:
                 runtime.shutdown()
                 runtime = None
                 app.state.runtime = None
 
     app = FastAPI(title="Tri Timing Local Service", lifespan=lifespan)
+
+    async def _cloud_sync_loop() -> None:
+        while True:
+            await asyncio.sleep(service_settings.cloud_sync_interval_sec)
+            current_runtime = runtime
+            if current_runtime is not None:
+                await current_runtime.publish_cloud_sync_once()
 
     @app.get("/api/health")
     async def health() -> dict[str, bool]:

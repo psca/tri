@@ -1,4 +1,5 @@
 from pathlib import Path
+import asyncio
 import json
 
 import pytest
@@ -19,6 +20,63 @@ def test_health_endpoint(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_create_app_uses_env_settings_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TRI_RACE_CONFIG", "tests/fixtures/race.yaml")
+    monkeypatch.setenv("TRI_ATHLETES", "tests/fixtures/athletes.csv")
+    monkeypatch.setenv("TRI_DATABASE", str(tmp_path / "env-race.sqlite"))
+
+    app = create_app()
+
+    with TestClient(app) as client:
+        response = client.get("/api/race/state")
+
+    assert response.status_code == 200
+    assert response.json()["race_id"] == "duathlon-demo"
+
+
+def test_lifespan_runs_cloud_sync_loop(tmp_path, monkeypatch) -> None:
+    calls = 0
+
+    class FakeRuntime:
+        @classmethod
+        def create(cls, settings, database_path=None):
+            return cls()
+
+        def state(self):
+            return RaceStateView(
+                race_id="duathlon-demo",
+                phase="pre_start",
+                athletes=[],
+                accepted_events=[],
+                raw_detections=[],
+                warnings=[],
+            )
+
+        async def publish_cloud_sync_once(self):
+            nonlocal calls
+            calls += 1
+            return 0
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr("tri_timing_service.app.RaceRuntime", FakeRuntime)
+    settings = ServiceSettings(
+        race_config_path=Path("tests/fixtures/race.yaml"),
+        athletes_path=Path("tests/fixtures/athletes.csv"),
+        database_path=tmp_path / "race.sqlite",
+        cloud_sync_interval_sec=0.01,
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/race/state")
+        assert response.status_code == 200
+        asyncio.run(asyncio.sleep(0.03))
+
+    assert calls > 0
 
 
 def test_lifespan_fails_startup_when_config_missing(tmp_path) -> None:

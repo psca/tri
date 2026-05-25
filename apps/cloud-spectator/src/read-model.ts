@@ -11,6 +11,26 @@ export interface AcceptedRouteEventPayload {
 
 export type RaceEvent = Omit<AcceptedRouteEventPayload, "type">;
 
+export interface RaceStateSnapshotPayload {
+  type: "race_state_snapshot";
+  race_id: string;
+  name?: string;
+  phase: string;
+  generated_at: string;
+  state: unknown;
+}
+
+export interface ReceiverHealthSnapshotPayload {
+  type: "receiver_health_snapshot";
+  race_id: string;
+  receiver_id: string;
+  checkpoint_id: string;
+  status: string;
+  last_packet_at?: string | null;
+  packet_rate?: number | null;
+  updated_at: string;
+}
+
 export interface RaceState {
   updated_at: string;
   state: unknown;
@@ -23,7 +43,10 @@ export interface SyncEnvelope {
   local_sequence_number: number;
   type: "accepted_route_event" | "race_state_snapshot" | "receiver_health_snapshot";
   created_at: string;
-  payload: AcceptedRouteEventPayload | Record<string, unknown>;
+  payload:
+    | AcceptedRouteEventPayload
+    | RaceStateSnapshotPayload
+    | ReceiverHealthSnapshotPayload;
 }
 
 export class BadSyncEnvelopeError extends Error {
@@ -77,6 +100,39 @@ function validateAcceptedRouteEventPayload(
   }
 }
 
+function validateRaceStateSnapshotPayload(
+  envelope: SyncEnvelope,
+): asserts envelope is SyncEnvelope & { payload: RaceStateSnapshotPayload } {
+  const payload = envelope.payload;
+  if (
+    !isRecord(payload) ||
+    payload.type !== "race_state_snapshot" ||
+    payload.race_id !== envelope.race_id ||
+    !isNonEmptyString(payload.phase) ||
+    !isNonEmptyString(payload.generated_at) ||
+    !("state" in payload)
+  ) {
+    throw new BadSyncEnvelopeError();
+  }
+}
+
+function validateReceiverHealthSnapshotPayload(
+  envelope: SyncEnvelope,
+): asserts envelope is SyncEnvelope & { payload: ReceiverHealthSnapshotPayload } {
+  const payload = envelope.payload;
+  if (
+    !isRecord(payload) ||
+    payload.type !== "receiver_health_snapshot" ||
+    payload.race_id !== envelope.race_id ||
+    !isNonEmptyString(payload.receiver_id) ||
+    !isNonEmptyString(payload.checkpoint_id) ||
+    !isNonEmptyString(payload.status) ||
+    !isNonEmptyString(payload.updated_at)
+  ) {
+    throw new BadSyncEnvelopeError();
+  }
+}
+
 export function parseSyncEnvelope(value: unknown): SyncEnvelope {
   if (!isRecord(value)) {
     throw new BadSyncEnvelopeError();
@@ -101,11 +157,15 @@ export function parseSyncEnvelope(value: unknown): SyncEnvelope {
     local_sequence_number: value.local_sequence_number,
     type: value.type,
     created_at: value.created_at,
-    payload: value.payload,
+    payload: value.payload as unknown as SyncEnvelope["payload"],
   };
 
   if (envelope.type === "accepted_route_event") {
     validateAcceptedRouteEventPayload(envelope);
+  } else if (envelope.type === "race_state_snapshot") {
+    validateRaceStateSnapshotPayload(envelope);
+  } else if (envelope.type === "receiver_health_snapshot") {
+    validateReceiverHealthSnapshotPayload(envelope);
   }
 
   return envelope;
@@ -117,15 +177,18 @@ async function resolveFailedInsert(
   cause: unknown,
 ): Promise<"duplicate"> {
   const existing = await db
-    .prepare("SELECT payload_hash FROM sync_items WHERE idempotency_key = ?")
+    .prepare("SELECT payload_hash, payload_json FROM sync_items WHERE idempotency_key = ?")
     .bind(envelope.idempotency_key)
-    .first<{ payload_hash: string }>();
+    .first<{ payload_hash: string; payload_json: string }>();
 
   if (!existing) {
     throw cause;
   }
 
-  if (existing.payload_hash !== envelope.payload_hash) {
+  if (
+    existing.payload_hash !== envelope.payload_hash ||
+    existing.payload_json !== JSON.stringify(envelope.payload)
+  ) {
     throw new IdempotencyKeyConflictError();
   }
 
@@ -138,11 +201,16 @@ export async function projectEnvelope(
 ): Promise<"accepted" | "duplicate"> {
   if (envelope.type === "accepted_route_event") {
     validateAcceptedRouteEventPayload(envelope);
+  } else if (envelope.type === "race_state_snapshot") {
+    validateRaceStateSnapshotPayload(envelope);
+  } else if (envelope.type === "receiver_health_snapshot") {
+    validateReceiverHealthSnapshotPayload(envelope);
   }
 
+  const payloadJson = JSON.stringify(envelope.payload);
   const syncItemStatement = db
     .prepare(
-      "INSERT INTO sync_items (idempotency_key, race_id, local_sequence_number, type, payload_hash, received_at) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sync_items (idempotency_key, race_id, local_sequence_number, type, payload_hash, payload_json, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(
       envelope.idempotency_key,
@@ -150,11 +218,12 @@ export async function projectEnvelope(
       envelope.local_sequence_number,
       envelope.type,
       envelope.payload_hash,
+      payloadJson,
       new Date().toISOString(),
     );
 
   if (envelope.type === "accepted_route_event") {
-    const payload = envelope.payload;
+    const payload = envelope.payload as AcceptedRouteEventPayload;
     const projectionStatement = db
       .prepare(
         "INSERT INTO accepted_route_events (race_id, local_sequence_number, athlete_id, route_event_id, checkpoint_id, event_time_wall, confidence) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -167,6 +236,54 @@ export async function projectEnvelope(
         payload.checkpoint_id,
         payload.event_time_wall,
         payload.confidence,
+      );
+
+    try {
+      await db.batch([syncItemStatement, projectionStatement]);
+    } catch (error) {
+      return resolveFailedInsert(db, envelope, error);
+    }
+
+    return "accepted";
+  }
+
+  if (envelope.type === "race_state_snapshot") {
+    const payload = envelope.payload as RaceStateSnapshotPayload;
+    const projectionStatement = db
+      .prepare(
+        "INSERT INTO races (race_id, name, phase, updated_at, snapshot_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(race_id) DO UPDATE SET name = excluded.name, phase = excluded.phase, updated_at = excluded.updated_at, snapshot_json = excluded.snapshot_json",
+      )
+      .bind(
+        envelope.race_id,
+        payload.name ?? null,
+        payload.phase,
+        payload.generated_at,
+        JSON.stringify(payload.state),
+      );
+
+    try {
+      await db.batch([syncItemStatement, projectionStatement]);
+    } catch (error) {
+      return resolveFailedInsert(db, envelope, error);
+    }
+
+    return "accepted";
+  }
+
+  if (envelope.type === "receiver_health_snapshot") {
+    const payload = envelope.payload as ReceiverHealthSnapshotPayload;
+    const projectionStatement = db
+      .prepare(
+        "INSERT INTO receiver_health (race_id, receiver_id, checkpoint_id, status, last_packet_at, packet_rate, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(race_id, receiver_id) DO UPDATE SET checkpoint_id = excluded.checkpoint_id, status = excluded.status, last_packet_at = excluded.last_packet_at, packet_rate = excluded.packet_rate, updated_at = excluded.updated_at",
+      )
+      .bind(
+        envelope.race_id,
+        payload.receiver_id,
+        payload.checkpoint_id,
+        payload.status,
+        payload.last_packet_at ?? null,
+        payload.packet_rate ?? null,
+        payload.updated_at,
       );
 
     try {

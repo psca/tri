@@ -122,6 +122,29 @@ def test_sync_outbox_payload_hash_matches_stored_payload_json(tmp_path):
     assert outbox[0]["status"] == "pending"
 
 
+def test_sync_outbox_rows_can_be_marked_synced(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+    sequence = store.append_accepted_route_event(
+        race_id="duathlon-001",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        checkpoint_id="gate",
+        pass_candidate_id="candidate-1",
+        event_time_wall="2026-05-25T09:00:00+00:00",
+        confidence="high",
+    )
+
+    pending = store.pending_sync_outbox(limit=10)
+    assert [row["local_sequence_number"] for row in pending] == [sequence]
+
+    store.mark_sync_success(sequence, synced_at="2026-05-25T09:00:05+00:00")
+
+    assert store.pending_sync_outbox(limit=10) == []
+    row = store.sync_outbox()[0]
+    assert row["status"] == "synced"
+    assert row["synced_at"] == "2026-05-25T09:00:05+00:00"
+
+
 def test_context_manager_closes_store(tmp_path):
     with EventStore(tmp_path / "race.db") as store:
         assert store.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1

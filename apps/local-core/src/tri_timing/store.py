@@ -81,7 +81,14 @@ class EventStore:
             );
             """
         )
+        self._ensure_column("sync_outbox", "synced_at", "synced_at TEXT")
+        self._ensure_column("sync_outbox", "next_attempt_at", "next_attempt_at TEXT")
         self.conn.commit()
+
+    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        rows = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if column not in {str(row["name"]) for row in rows}:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
     def _next_sequence(self) -> int:
         row = self.conn.execute(
@@ -216,6 +223,49 @@ class EventStore:
             "SELECT * FROM sync_outbox ORDER BY local_sequence_number"
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def pending_sync_outbox(self, *, limit: int) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT * FROM sync_outbox
+            WHERE status IN ('pending', 'failed_retryable')
+            ORDER BY local_sequence_number
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_sync_success(self, local_sequence_number: int, *, synced_at: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE sync_outbox
+                SET status = 'synced', synced_at = ?, last_error = NULL
+                WHERE local_sequence_number = ?
+                """,
+                (synced_at, local_sequence_number),
+            )
+
+    def mark_sync_failure(
+        self,
+        local_sequence_number: int,
+        *,
+        error: str,
+        next_attempt_at: str | None,
+    ) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE sync_outbox
+                SET status = 'failed_retryable',
+                    attempts = attempts + 1,
+                    last_error = ?,
+                    next_attempt_at = ?
+                WHERE local_sequence_number = ?
+                """,
+                (error, next_attempt_at, local_sequence_number),
+            )
 
     def set_metadata(self, key: str, value: str) -> None:
         with self.conn:

@@ -10,6 +10,8 @@
 
 **Python tooling:** Use `uv` for dependency sync and command execution. Prefer `uv run pytest ...` and `uv run tri-timing ...` over direct `python -m ...` commands.
 
+**Current location:** This plan was implemented before the monorepo cleanup. The local core now lives under `apps/local-core/`, so paths in this historical plan are relative to that app directory unless noted otherwise.
+
 ---
 
 ## Scope
@@ -1304,12 +1306,12 @@ git commit -m "feat: add synthetic replay cli"
 ### Task 7: Local Core Acceptance Check
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-05-25-ble-triathlon-timing-mvp-design.md`
-- Create: `docs/local-core-acceptance.md`
+- Modify: `docs/specs/2026-05-25-ble-triathlon-timing-mvp-design.md`
+- Create: `docs/acceptance/local-core.md`
 
 - [ ] **Step 1: Create acceptance checklist**
 
-Create `docs/local-core-acceptance.md`:
+Create `docs/acceptance/local-core.md`:
 
 ```markdown
 # Local Core Acceptance Checklist
@@ -1319,6 +1321,7 @@ This checklist proves the local Python timing core is ready for admin UI plannin
 ## Required Commands
 
 ```bash
+cd apps/local-core
 uv run pytest -v
 uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \
@@ -1349,6 +1352,7 @@ cat /tmp/tri-timing-result.json
 Run:
 
 ```bash
+cd apps/local-core
 uv run pytest -v
 uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
 cat /tmp/tri-timing-result.json
@@ -1372,7 +1376,7 @@ and JSON includes:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/local-core-acceptance.md
+git add docs/acceptance/local-core.md
 git commit -m "docs: add local core acceptance checklist"
 ```
 

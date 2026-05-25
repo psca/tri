@@ -2,7 +2,7 @@
 
 BLE-assisted timing system for friendly triathlon and duathlon competitions.
 
-The current implementation is a local-first Python timing core. The intended MVP uses configurable iBeacon wristbands, a laptop with a USB BLE dongle as the race authority, and later Cloudflare sync for a read-only spectator dashboard and backup storage.
+The current implementation is a local-first Python timing core in a monorepo layout. The intended MVP uses configurable iBeacon wristbands, a laptop with a USB BLE dongle as the race authority, and later Cloudflare sync for a read-only spectator dashboard and backup storage.
 
 ## Current Status
 
@@ -23,11 +23,22 @@ Implemented so far:
 
 ## Key Documents
 
-- [MVP design spec](docs/superpowers/specs/2026-05-25-ble-triathlon-timing-mvp-design.md)
-- [HTML slide deck](docs/superpowers/specs/2026-05-25-ble-triathlon-timing-mvp-slides.html)
-- [Local-core implementation plan](docs/superpowers/plans/2026-05-25-ble-timing-local-core.md)
-- [Local-core acceptance checklist](docs/local-core-acceptance.md)
+- [MVP design spec](docs/specs/2026-05-25-ble-triathlon-timing-mvp-design.md)
+- [HTML slide deck](docs/specs/2026-05-25-ble-triathlon-timing-mvp-slides.html)
+- [Local-core implementation plan](docs/plans/2026-05-25-ble-timing-local-core.md)
+- [Local-core acceptance checklist](docs/acceptance/local-core.md)
 - [Contributor guide](AGENTS.md)
+
+## Repository Layout
+
+```text
+apps/
+  local-core/      Python timing authority, tests, and CLI
+docs/
+  specs/           Design specs and slide decks
+  plans/           Implementation plans
+  acceptance/      Acceptance checklists
+```
 
 ## Planned Architecture
 
@@ -54,6 +65,7 @@ Core rules:
 Python uses `uv` for environment and command execution:
 
 ```bash
+cd apps/local-core
 uv sync --dev
 uv run pytest -v
 uv run tri-timing synthetic-replay \

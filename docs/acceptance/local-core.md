@@ -5,6 +5,7 @@ This checklist proves the local Python timing core is ready for admin UI plannin
 ## Required Commands
 
 ```bash
+cd apps/local-core
 uv run pytest -v
 uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \

@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from tri_timing_service.app import create_app
@@ -12,6 +15,19 @@ def test_health_endpoint(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_lifespan_fails_startup_when_config_missing(tmp_path) -> None:
+    settings = ServiceSettings(
+        race_config_path=Path("tests/fixtures/missing-race.yaml"),
+        athletes_path=Path("tests/fixtures/missing-athletes.csv"),
+        database_path=tmp_path / "race.sqlite",
+    )
+    app = create_app(settings)
+
+    with pytest.raises(FileNotFoundError):
+        with TestClient(app):
+            pass
 
 
 def test_state_start_and_close_endpoints(tmp_path) -> None:

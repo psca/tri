@@ -16,15 +16,15 @@ def create_app(
     runtime: RaceRuntime | None = None
 
     def get_runtime() -> RaceRuntime:
-        nonlocal runtime
         if runtime is None:
-            runtime = RaceRuntime.create(service_settings, database_path=database_path)
-            app.state.runtime = runtime
+            raise RuntimeError("Race runtime is not initialized")
         return runtime
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal runtime
+        runtime = RaceRuntime.create(service_settings, database_path=database_path)
+        app.state.runtime = runtime
         try:
             yield
         finally:

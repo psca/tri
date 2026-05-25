@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manual Review & Corrections MVP</title>
+  <style>
+    :root {
+      --ink: #17211d;
+      --muted: #637067;
+      --paper: #f7f0df;
+      --card: rgba(255, 255, 255, 0.78);
+      --line: rgba(23, 33, 29, 0.15);
+      --red: #e3492d;
+      --green: #087f5b;
+      --amber: #e2a21a;
+      --blue: #2457a6;
+      --black: #111816;
+      --shadow: 0 28px 72px rgba(17, 24, 22, 0.18);
+      --radius: 30px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 15%, rgba(227, 73, 45, 0.26), transparent 26rem),
+        radial-gradient(circle at 86% 22%, rgba(8, 127, 91, 0.24), transparent 30rem),
+        radial-gradient(circle at 54% 88%, rgba(226, 162, 26, 0.24), transparent 28rem),
+        linear-gradient(135deg, #fff6df 0%, #eaf3ea 58%, #f8d3c5 100%);
+      font-family: "Avenir Next", "Trebuchet MS", Verdana, sans-serif;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      opacity: 0.22;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(23, 33, 29, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 33, 29, 0.08) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(circle at center, black, transparent 80%);
+    }
+
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: 5.2vh 6.2vw;
+    }
+
+    .slide.active {
+      display: grid;
+      place-items: center;
+      animation: enter 360ms ease both;
+    }
+
+    @keyframes enter {
+      from { opacity: 0; transform: translateY(16px) scale(0.992); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .frame {
+      width: min(1180px, 100%);
+      min-height: min(730px, 86vh);
+      padding: clamp(28px, 4vw, 58px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--card);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .frame::after {
+      content: "";
+      position: absolute;
+      right: -95px;
+      bottom: -115px;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(227, 73, 45, 0.18), transparent 70%);
+    }
+
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.78rem;
+      font-weight: 900;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 900;
+      letter-spacing: -0.055em;
+      line-height: 0.96;
+    }
+
+    h1 { max-width: 980px; font-size: clamp(4rem, 8.6vw, 7.4rem); }
+    h2 { max-width: 1000px; font-size: clamp(2.8rem, 6.4vw, 5.6rem); }
+    h3 { margin: 0 0 12px; font-size: clamp(1.05rem, 1.6vw, 1.45rem); }
+
+    p,
+    li {
+      color: var(--muted);
+      font-size: clamp(1rem, 1.45vw, 1.25rem);
+      line-height: 1.45;
+    }
+
+    .lead {
+      margin-top: 28px;
+      max-width: 920px;
+      color: #2b4038;
+      font-size: clamp(1.35rem, 2.35vw, 2rem);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      margin-top: 34px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 22px;
+      background: rgba(255, 255, 255, 0.66);
+    }
+
+    .card strong {
+      display: block;
+      color: var(--ink);
+      font-size: clamp(1.08rem, 1.55vw, 1.35rem);
+      margin-bottom: 9px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 8px 0 0;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(17, 24, 22, 0.16);
+      background: rgba(255, 255, 255, 0.72);
+      font-weight: 900;
+      font-size: 0.9rem;
+    }
+
+    .ok { color: var(--green); }
+    .warn { color: var(--amber); }
+    .bad { color: var(--red); }
+    .info { color: var(--blue); }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 34px;
+      max-width: 980px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .flow div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-radius: 18px;
+      border: 1px solid rgba(23, 33, 29, 0.12);
+      background: rgba(23, 33, 29, 0.07);
+      font-weight: 900;
+      font-size: clamp(1rem, 1.55vw, 1.32rem);
+    }
+
+    .flow div::after { content: "->"; color: var(--red); }
+    .flow div:last-child::after { content: "done"; color: var(--green); }
+
+    .mock {
+      display: grid;
+      grid-template-columns: 0.9fr 1.35fr 1fr;
+      gap: 14px;
+      margin-top: 34px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .mock-pane {
+      min-height: 390px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.68);
+      padding: 16px;
+    }
+
+    .athlete-row,
+    .timeline-row,
+    .action-row {
+      padding: 13px;
+      margin-bottom: 10px;
+      border-radius: 16px;
+      background: rgba(23, 33, 29, 0.07);
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      font-weight: 800;
+    }
+
+    .timeline-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .action-row {
+      color: white;
+      background: var(--black);
+    }
+
+    code {
+      padding: 3px 7px;
+      border-radius: 8px;
+      background: rgba(23, 33, 29, 0.08);
+      color: #1c312b;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    pre {
+      margin: 30px 0 0;
+      padding: 22px;
+      border-radius: 22px;
+      background: #14201c;
+      color: #f7f0df;
+      overflow: auto;
+      font-size: clamp(0.85rem, 1.2vw, 1.05rem);
+      line-height: 1.5;
+    }
+
+    .nav {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 20;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 34px rgba(17, 24, 22, 0.14);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav button {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 13px;
+      color: white;
+      background: var(--ink);
+      cursor: pointer;
+      font-weight: 900;
+    }
+
+    .counter {
+      min-width: 64px;
+      text-align: center;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    @media (max-width: 850px) {
+      body { overflow: auto; }
+      .deck { height: auto; }
+      .slide { position: static; min-height: 100vh; padding: 20px; }
+      .slide:not(.active) { display: none; }
+      .grid,
+      .grid.three,
+      .mock { grid-template-columns: 1fr; }
+      .frame { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide active">
+      <div class="frame">
+        <p class="eyebrow">Local Race Authority</p>
+        <h1>Manual Review & Corrections</h1>
+        <p class="lead">Small race-day adjudication layer. Fast enough for a helper. Auditable enough to trust after BLE gets noisy.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Problem</p>
+        <h2>BLE helps. Humans still decide edge cases.</h2>
+        <div class="grid">
+          <div class="card"><strong>Missed pass</strong><span>Beacon hidden, packet loss, weak RSSI, or athlete crosses too fast.</span></div>
+          <div class="card"><strong>Bad pass</strong><span>Duplicate, lingering near gate, wrong direction, or false positive.</span></div>
+          <div class="card"><strong>Wrong time</strong><span>System saw athlete, but best timestamp needs operator adjustment.</span></div>
+          <div class="card"><strong>Status call</strong><span>DNF, DQ, manual finish, or restart racing status.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Principle</p>
+        <h2>Never edit history. Append correction facts.</h2>
+        <div class="flow">
+          <div>BLE/raw detections captured</div>
+          <div>Race engine accepts route events</div>
+          <div>Operator adds correction facts</div>
+          <div>Review/export projection shows corrected truth</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Correction Types</p>
+        <h2>Four actions only.</h2>
+        <div class="grid">
+          <div class="card"><strong><code>manual_add_pass</code></strong><span>Add missing route event at known wall-clock time.</span></div>
+          <div class="card"><strong><code>manual_reject_pass</code></strong><span>Reject an accepted event without deleting it.</span></div>
+          <div class="card"><strong><code>manual_override_time</code></strong><span>Change displayed time while preserving original.</span></div>
+          <div class="card"><strong><code>mark_status</code></strong><span>Set DNF, DQ, manual finished, or racing.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Data Model</p>
+        <h2>One append-only table.</h2>
+        <pre>manual_corrections
+- local_sequence_number
+- race_id
+- correction_type
+- athlete_id
+- route_event_id
+- target_local_sequence_number
+- corrected_time_wall
+- status
+- reason
+- created_at
+- created_by</pre>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Projection</p>
+        <h2>Corrected state is derived, not hand-mutated.</h2>
+        <div class="grid three">
+          <div class="card"><strong>1. Route config</strong><span>Expected ordered events and athletes.</span></div>
+          <div class="card"><strong>2. Accepted events</strong><span>BLE-derived pass facts from race engine.</span></div>
+          <div class="card"><strong>3. Corrections</strong><span>Manual add, reject, override, status facts.</span></div>
+        </div>
+        <p class="lead">Invalid stale corrections become warnings, not crashes.</p>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">API</p>
+        <h2>Three local endpoints.</h2>
+        <pre>GET  /api/review/state
+GET  /api/corrections
+POST /api/corrections</pre>
+        <div class="grid">
+          <div class="card"><strong>Allowed live</strong><span>Corrections can happen during race or after close.</span></div>
+          <div class="card"><strong>Validated</strong><span>Unknown athlete/event or missing reason returns 400.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Operator UI</p>
+        <h2>Review mode, not spreadsheet mode.</h2>
+        <div class="mock">
+          <div class="mock-pane">
+            <h3>Athletes</h3>
+            <div class="athlete-row bad">Bob #12<br><span class="pill bad">missing</span></div>
+            <div class="athlete-row warn">Mei #7<br><span class="pill warn">manual</span></div>
+            <div class="athlete-row ok">Sam #4<br><span class="pill ok">ok</span></div>
+          </div>
+          <div class="mock-pane">
+            <h3>Bob Timeline</h3>
+            <div class="timeline-row"><span>Run L1</span><span class="ok">accepted</span></div>
+            <div class="timeline-row"><span>Run L2</span><span class="bad">missing</span></div>
+            <div class="timeline-row"><span>Run L3</span><span class="warn">pending</span></div>
+            <div class="timeline-row"><span>Finish</span><span>pending</span></div>
+          </div>
+          <div class="mock-pane">
+            <h3>Actions</h3>
+            <div class="action-row">Add missing pass</div>
+            <div class="action-row">Reject selected pass</div>
+            <div class="action-row">Override time</div>
+            <div class="action-row">Mark DNF/DQ</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Attention First</p>
+        <h2>Default view answers: who needs help now?</h2>
+        <div class="grid">
+          <div class="card"><strong class="bad">Missing</strong><span>Expected event absent after plausible time.</span></div>
+          <div class="card"><strong class="warn">Manual</strong><span>Human touched event; obvious badge.</span></div>
+          <div class="card"><strong class="info">Overridden</strong><span>Time changed, original preserved.</span></div>
+          <div class="card"><strong class="bad">Rejected</strong><span>Event ignored in corrected result.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Safety UX</p>
+        <h2>No accidental one-click edits.</h2>
+        <p class="lead">Every correction opens a plain-language confirmation.</p>
+        <pre>Add manual pass for Bob at Run 1 Lap 2, time 09:21:00?
+Reason: Saw athlete cross while BLE missed.</pre>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">Cloud Sync</p>
+        <h2>Cloud sees corrected local truth.</h2>
+        <ul>
+          <li>Corrections enqueue through existing SQLite outbox.</li>
+          <li><code>race_state_snapshot</code> includes correction effects.</li>
+          <li><code>manual_correction</code> payload syncs audit visibility.</li>
+          <li>Cloud remains read-only. No remote correction commands.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="frame">
+        <p class="eyebrow">MVP Line</p>
+        <h2>Effective, not overcooked.</h2>
+        <div class="grid">
+          <div class="card"><strong>Build</strong><span>Append corrections, review projection, correction API, fast admin review UI.</span></div>
+          <div class="card"><strong>Skip</strong><span>Route editor, roles, bulk edit, advanced replay UI, cloud writes.</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Slide navigation">
+    <button id="prev" type="button">Prev</button>
+    <span class="counter" id="counter">1 / 12</span>
+    <button id="next" type="button">Next</button>
+  </nav>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const counter = document.getElementById("counter");
+    let index = 0;
+
+    function show(nextIndex) {
+      index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+      slides.forEach((slide, slideIndex) => {
+        slide.classList.toggle("active", slideIndex === index);
+      });
+      counter.textContent = `${index + 1} / ${slides.length}`;
+    }
+
+    document.getElementById("prev").addEventListener("click", () => show(index - 1));
+    document.getElementById("next").addEventListener("click", () => show(index + 1));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === " ") show(index + 1);
+      if (event.key === "ArrowLeft") show(index - 1);
+    });
+
+    show(0);
+  </script>
+</body>
+</html>

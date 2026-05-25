@@ -99,6 +99,72 @@ def test_runtime_start_does_not_reset_engine_baseline_while_live(tmp_path) -> No
     assert runtime._engine.race_start_sec == 12345
 
 
+def test_runtime_restores_live_phase_after_restart(tmp_path) -> None:
+    settings = ServiceSettings.for_tests()
+    database_path = tmp_path / "race.sqlite"
+    runtime = RaceRuntime.create(settings, database_path=database_path)
+    runtime.start()
+    original_start_sec = runtime._engine.race_start_sec
+    runtime.shutdown()
+
+    restarted = RaceRuntime.create(settings, database_path=database_path)
+    try:
+        assert restarted.state().phase == "live"
+        assert restarted._engine.race_start_sec == original_start_sec
+    finally:
+        restarted.shutdown()
+
+
+def test_runtime_restores_closed_phase_after_restart(tmp_path) -> None:
+    settings = ServiceSettings.for_tests()
+    database_path = tmp_path / "race.sqlite"
+    runtime = RaceRuntime.create(settings, database_path=database_path)
+    runtime.start()
+    runtime.close()
+    runtime.shutdown()
+
+    restarted = RaceRuntime.create(settings, database_path=database_path)
+    try:
+        assert restarted.state().phase == "closed"
+    finally:
+        restarted.shutdown()
+
+
+def test_runtime_start_uses_current_monotonic_time(tmp_path) -> None:
+    settings = ServiceSettings.for_tests()
+    runtime = RaceRuntime.create(settings, database_path=tmp_path / "race.sqlite")
+
+    runtime.start()
+
+    assert runtime._engine.race_start_sec is not None
+    assert runtime._engine.race_start_sec != 100
+
+
+def test_runtime_state_includes_recent_raw_detections(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    with EventStore(database_path) as store:
+        store.append_raw_detection(
+            race_id="duathlon-demo",
+            receiver_id="laptop-dongle-1",
+            checkpoint_id="gate",
+            beacon_uuid="11111111-1111-1111-1111-111111111111",
+            beacon_major=1,
+            beacon_minor=2,
+            rssi=-61,
+            timestamp_wall="2026-05-25T08:00:00+08:00",
+            timestamp_monotonic=12.5,
+            process_instance_id="proc-1",
+        )
+    settings = ServiceSettings.for_tests()
+    runtime = RaceRuntime.create(settings, database_path=database_path)
+
+    state = runtime.state()
+
+    assert len(state.raw_detections) == 1
+    assert state.raw_detections[0].receiver_id == "laptop-dongle-1"
+    assert state.raw_detections[0].rssi == -61
+
+
 def test_runtime_shutdown_closes_event_store(tmp_path) -> None:
     settings = ServiceSettings.for_tests()
     runtime = RaceRuntime.create(settings, database_path=tmp_path / "race.sqlite")

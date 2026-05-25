@@ -74,6 +74,11 @@ class EventStore:
               attempts INTEGER NOT NULL DEFAULT 0,
               last_error TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS race_metadata (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
             """
         )
         self.conn.commit()
@@ -183,7 +188,18 @@ class EventStore:
             )
             return sequence
 
-    def raw_detections(self) -> list[dict[str, Any]]:
+    def raw_detections(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        if limit is not None:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM raw_detections
+                ORDER BY local_sequence_number DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in reversed(rows)]
+
         rows = self.conn.execute(
             "SELECT * FROM raw_detections ORDER BY local_sequence_number"
         ).fetchall()
@@ -200,3 +216,21 @@ class EventStore:
             "SELECT * FROM sync_outbox ORDER BY local_sequence_number"
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def set_metadata(self, key: str, value: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO race_metadata (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+
+    def metadata(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM race_metadata WHERE key = ?",
+            (key,),
+        ).fetchone()
+        return None if row is None else str(row["value"])

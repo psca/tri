@@ -145,3 +145,20 @@ def test_store_enables_wal_and_foreign_keys(tmp_path):
         assert foreign_keys == 1
     finally:
         store.close()
+
+
+def test_store_persists_race_metadata(tmp_path):
+    store = EventStore(tmp_path / "race.db")
+
+    store.set_metadata("phase", "live")
+    store.set_metadata("race_start_wall", "2026-05-25T08:00:00+00:00")
+    store.set_metadata("race_start_sec", "123.45")
+
+    reopened = EventStore(tmp_path / "race.db")
+    try:
+        assert reopened.metadata("phase") == "live"
+        assert reopened.metadata("race_start_wall") == "2026-05-25T08:00:00+00:00"
+        assert reopened.metadata("race_start_sec") == "123.45"
+    finally:
+        store.close()
+        reopened.close()

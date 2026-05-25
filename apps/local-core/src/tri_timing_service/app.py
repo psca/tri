@@ -46,7 +46,7 @@ def create_app(
     @app.get("/api/events/stream")
     async def event_stream():
         return StreamingResponse(
-            broadcaster.initial_stream(),
+            broadcaster.stream(get_runtime().state()),
             media_type="text/event-stream",
         )
 
@@ -56,17 +56,23 @@ def create_app(
 
     @app.post("/api/race/start")
     async def start_race():
-        return get_runtime().start()
+        state = get_runtime().start()
+        broadcaster.publish_state(state)
+        return state
 
     @app.post("/api/race/close")
     async def close_race():
-        return get_runtime().close()
+        state = get_runtime().close()
+        broadcaster.publish_state(state)
+        return state
 
     @app.post("/api/synthetic/detection")
     async def synthetic_detection(request: SyntheticDetectionRequest):
         try:
-            return get_runtime().synthetic_detection(request)
+            state = get_runtime().synthetic_detection(request)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        broadcaster.publish_state(state)
+        return state
 
     return app

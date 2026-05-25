@@ -1,3 +1,4 @@
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from tri_timing_service.models import (
     AcceptedEventView,
     AthleteView,
     RaceStateView,
+    RawDetectionView,
     SyntheticDetectionRequest,
 )
 from tri_timing_service.settings import ServiceSettings
@@ -30,7 +32,8 @@ class RaceRuntime:
         for athlete in self._athletes:
             self._engine.add_athlete(athlete.athlete_id)
         self._hydrate_engine_from_store()
-        self._phase = "pre_start"
+        self._phase = self._store.metadata("phase") or "pre_start"
+        self._restore_engine_phase()
 
     @classmethod
     def create(
@@ -69,26 +72,47 @@ class RaceRuntime:
             )
             for row in self._store.accepted_route_events()
         ]
+        raw_detections = [
+            RawDetectionView(
+                local_sequence_number=row["local_sequence_number"],
+                receiver_id=row["receiver_id"],
+                checkpoint_id=row["checkpoint_id"],
+                beacon_uuid=row["beacon_uuid"],
+                beacon_major=row["beacon_major"],
+                beacon_minor=row["beacon_minor"],
+                rssi=row["rssi"],
+                timestamp_wall=row["timestamp_wall"],
+            )
+            for row in self._store.raw_detections(limit=25)
+        ]
 
         return RaceStateView(
             race_id=self._race_config.race_id,
             phase=self._phase,
             athletes=athletes,
             accepted_events=accepted_events,
+            raw_detections=raw_detections,
             warnings=[],
         )
 
     def start(self) -> RaceStateView:
         if self._phase == "pre_start":
             self._phase = "live"
+            race_start_sec = time.monotonic()
+            race_start_wall = datetime.now(tz=UTC).isoformat()
+            self._store.set_metadata("phase", self._phase)
+            self._store.set_metadata("race_start_sec", str(race_start_sec))
+            self._store.set_metadata("race_start_wall", race_start_wall)
             self._engine.start(
-                race_start_sec=100,
+                race_start_sec=race_start_sec,
                 start_grace_sec=self._race_config.start.start_grace_sec,
             )
         return self.state()
 
     def close(self) -> RaceStateView:
         self._phase = "closed"
+        self._store.set_metadata("phase", self._phase)
+        self._store.set_metadata("race_closed_wall", datetime.now(tz=UTC).isoformat())
         return self.state()
 
     def synthetic_detection(self, request: SyntheticDetectionRequest) -> RaceStateView:
@@ -217,6 +241,24 @@ class RaceRuntime:
 
             if expected.kind == RouteEventKind.FINISH or expected.kind == "finish":
                 state.status = "finished"
+
+    def _restore_engine_phase(self) -> None:
+        if self._phase not in {"live", "closed"}:
+            return
+
+        race_start_sec_text = self._store.metadata("race_start_sec")
+        try:
+            race_start_sec = (
+                float(race_start_sec_text) if race_start_sec_text is not None else None
+            )
+        except ValueError:
+            race_start_sec = None
+
+        if race_start_sec is not None:
+            self._engine.start(
+                race_start_sec=race_start_sec,
+                start_grace_sec=self._race_config.start.start_grace_sec,
+            )
 
     def _peak_time_sec_from_candidate_id(self, candidate_id: str | None) -> float | None:
         if candidate_id is None:

@@ -11,6 +11,17 @@ export function App() {
     getRaceState().then(setState).catch((err: Error) => setError(err.message));
   }, []);
 
+  useEffect(() => {
+    const events = new EventSource("/api/events/stream");
+    events.addEventListener("state", (event) => {
+      setState(JSON.parse(event.data) as RaceStateView);
+    });
+    events.onerror = () => {
+      setError("Live event stream disconnected");
+    };
+    return () => events.close();
+  }, []);
+
   async function run(action: () => Promise<RaceStateView>) {
     setError(null);
 
@@ -61,6 +72,19 @@ export function App() {
           ))
         ) : (
           <p>No accepted events yet.</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Recent Detections</h2>
+        {state?.raw_detections.length ? (
+          state.raw_detections.map((detection) => (
+            <p key={detection.local_sequence_number}>
+              {detection.receiver_id} · {detection.checkpoint_id} · {detection.rssi} dBm
+            </p>
+          ))
+        ) : (
+          <p>No raw detections yet.</p>
         )}
       </section>
     </main>

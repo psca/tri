@@ -14,10 +14,22 @@ export type AcceptedEventView = {
   confidence: string;
 };
 
+export type RawDetectionView = {
+  local_sequence_number: number;
+  receiver_id: string;
+  checkpoint_id: string;
+  beacon_uuid: string;
+  beacon_major: number;
+  beacon_minor: number;
+  rssi: number;
+  timestamp_wall: string;
+};
+
 export type RaceStateView = {
   race_id: string;
   phase: string;
   athletes: AthleteView[];
   accepted_events: AcceptedEventView[];
+  raw_detections: RawDetectionView[];
   warnings: string[];
 };

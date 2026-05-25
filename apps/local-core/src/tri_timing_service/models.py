@@ -17,11 +17,23 @@ class AcceptedEventView(BaseModel):
     confidence: str
 
 
+class RawDetectionView(BaseModel):
+    local_sequence_number: int
+    receiver_id: str
+    checkpoint_id: str
+    beacon_uuid: str
+    beacon_major: int
+    beacon_minor: int
+    rssi: int
+    timestamp_wall: str
+
+
 class RaceStateView(BaseModel):
     race_id: str
     phase: str
     athletes: list[AthleteView]
     accepted_events: list[AcceptedEventView]
+    raw_detections: list[RawDetectionView]
     warnings: list[str]
 
 

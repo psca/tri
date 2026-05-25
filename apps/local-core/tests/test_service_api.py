@@ -1,10 +1,13 @@
 from pathlib import Path
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tri_timing.store import EventStore
 from tri_timing_service.app import create_app
+from tri_timing_service.broadcaster import EventBroadcaster
+from tri_timing_service.models import RaceStateView
 from tri_timing_service.settings import ServiceSettings
 
 
@@ -69,7 +72,6 @@ def test_synthetic_detection_advances_expected_event(tmp_path) -> None:
                 "receiver_id": "synthetic",
                 "rssi": -55,
                 "repeat_count": 6,
-                "timestamp_sec": 500,
             },
         )
 
@@ -93,15 +95,16 @@ def test_restart_hydrates_last_event_time_for_too_early_detection(tmp_path) -> N
                 "receiver_id": "synthetic",
                 "rssi": -55,
                 "repeat_count": 6,
-                "timestamp_sec": 500,
             },
         )
 
     assert first.status_code == 200
     assert first.json()["athletes"][0]["next_event_id"] == "run1_lap2_complete"
 
+    with EventStore(database_path) as store:
+        first_peak_time = store.raw_detections()[0]["timestamp_monotonic"]
+
     with TestClient(app) as client:
-        client.post("/api/race/start")
         second = client.post(
             "/api/synthetic/detection",
             json={
@@ -110,7 +113,7 @@ def test_restart_hydrates_last_event_time_for_too_early_detection(tmp_path) -> N
                 "receiver_id": "synthetic",
                 "rssi": -55,
                 "repeat_count": 6,
-                "timestamp_sec": 700,
+                "timestamp_sec": first_peak_time + 10,
             },
         )
 
@@ -136,7 +139,6 @@ def test_restart_default_synthetic_timestamp_uses_last_event_time(tmp_path) -> N
                 "receiver_id": "synthetic",
                 "rssi": -55,
                 "repeat_count": 6,
-                "timestamp_sec": 500,
             },
         )
 
@@ -165,8 +167,11 @@ def test_restart_default_synthetic_timestamp_uses_last_event_time(tmp_path) -> N
     with EventStore(database_path) as store:
         raw_detections = store.raw_detections()
 
+    first_detection_samples = raw_detections[:7]
     second_detection_samples = raw_detections[7:]
-    assert second_detection_samples[0]["timestamp_monotonic"] == 951
+    assert second_detection_samples[0]["timestamp_monotonic"] == pytest.approx(
+        first_detection_samples[0]["timestamp_monotonic"] + 360 + 90 + 1
+    )
 
 
 def test_synthetic_detection_unknown_athlete_returns_400(tmp_path) -> None:
@@ -187,10 +192,69 @@ def test_synthetic_detection_unknown_athlete_returns_400(tmp_path) -> None:
     assert response.json()["detail"] == "unknown athlete: UNKNOWN"
 
 
-def test_sse_stream_opens(tmp_path) -> None:
+def test_sse_stream_sends_initial_state(tmp_path, monkeypatch) -> None:
+    class FakeBroadcaster:
+        def stream(self, initial_state: RaceStateView):
+            return iter(
+                [
+                    "event: connected\ndata: {}\n\n",
+                    f"event: state\ndata: {initial_state.model_dump_json()}\n\n",
+                ]
+            )
+
+        def publish_state(self, state: RaceStateView) -> None:
+            pass
+
+    monkeypatch.setattr("tri_timing_service.app.EventBroadcaster", FakeBroadcaster)
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
-        with client.stream("GET", "/api/events/stream") as response:
-            assert response.status_code == 200
-            assert response.headers["content-type"].startswith("text/event-stream")
+        response = client.get("/api/events/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: connected" in response.text
+    state_line = response.text.split("event: state\n", maxsplit=1)[1].splitlines()[0]
+
+    payload = json.loads(state_line.removeprefix("data: "))
+    assert payload["phase"] == "pre_start"
+
+
+def test_app_publishes_state_after_start(tmp_path, monkeypatch) -> None:
+    class FakeBroadcaster:
+        published: list[RaceStateView] = []
+
+        def stream(self, initial_state: RaceStateView):
+            return iter(())
+
+        def publish_state(self, state: RaceStateView) -> None:
+            self.published.append(state)
+
+    fake = FakeBroadcaster()
+    monkeypatch.setattr("tri_timing_service.app.EventBroadcaster", lambda: fake)
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post("/api/race/start")
+
+    assert response.status_code == 200
+    assert fake.published[-1].phase == "live"
+
+
+def test_sse_stream_publishes_state_to_subscribers(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+    with TestClient(app) as client:
+        started_state = RaceStateView.model_validate(client.post("/api/race/start").json())
+
+    broadcaster = EventBroadcaster()
+    stream = broadcaster.stream(started_state)
+    assert next(stream) == "event: connected\ndata: {}\n\n"
+    assert json.loads(next(stream).splitlines()[1].removeprefix("data: "))[
+        "phase"
+    ] == "live"
+
+    broadcaster.publish_state(started_state)
+    state_line = next(stream).splitlines()[1]
+
+    payload = json.loads(state_line.removeprefix("data: "))
+    assert payload["phase"] == "live"

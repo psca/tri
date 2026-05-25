@@ -203,5 +203,30 @@ class RaceRuntime:
                 continue
 
             state.next_route_event_index += 1
+            event_time_sec = self._peak_time_sec_from_candidate_id(
+                row["pass_candidate_id"]
+            )
+            if event_time_sec is not None:
+                state.last_event_time_sec = event_time_sec
+
+            processed_candidate_ids = self._engine._processed_candidate_ids.setdefault(
+                row["athlete_id"], set()
+            )
+            if row["pass_candidate_id"] is not None:
+                processed_candidate_ids.add(row["pass_candidate_id"])
+
             if expected.kind == RouteEventKind.FINISH or expected.kind == "finish":
                 state.status = "finished"
+
+    def _peak_time_sec_from_candidate_id(self, candidate_id: str | None) -> float | None:
+        if candidate_id is None:
+            return None
+
+        parts = candidate_id.split("-")
+        if len(parts) < 4 or parts[0] != "candidate":
+            return None
+
+        try:
+            return int(parts[2]) / 1000
+        except ValueError:
+            return None

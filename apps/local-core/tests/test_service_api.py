@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tri_timing.store import EventStore
 from tri_timing_service.app import create_app
 from tri_timing_service.settings import ServiceSettings
 
@@ -76,6 +77,96 @@ def test_synthetic_detection_advances_expected_event(tmp_path) -> None:
     body = response.json()
     assert body["accepted_events"][0]["route_event_id"] == "run1_lap1_complete"
     assert body["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+
+
+def test_restart_hydrates_last_event_time_for_too_early_detection(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        first = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+                "timestamp_sec": 500,
+            },
+        )
+
+    assert first.status_code == 200
+    assert first.json()["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        second = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+                "timestamp_sec": 700,
+            },
+        )
+
+    assert second.status_code == 200
+    body = second.json()
+    assert [event["route_event_id"] for event in body["accepted_events"]] == [
+        "run1_lap1_complete"
+    ]
+    assert body["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+
+
+def test_restart_default_synthetic_timestamp_uses_last_event_time(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        first = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+                "timestamp_sec": 500,
+            },
+        )
+
+    assert first.status_code == 200
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        second = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+            },
+        )
+
+    assert second.status_code == 200
+    body = second.json()
+    assert [event["route_event_id"] for event in body["accepted_events"]] == [
+        "run1_lap1_complete",
+        "run1_lap2_complete",
+    ]
+
+    with EventStore(database_path) as store:
+        raw_detections = store.raw_detections()
+
+    second_detection_samples = raw_detections[7:]
+    assert second_detection_samples[0]["timestamp_monotonic"] == 951
 
 
 def test_synthetic_detection_unknown_athlete_returns_400(tmp_path) -> None:

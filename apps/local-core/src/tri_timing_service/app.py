@@ -24,11 +24,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        nonlocal runtime
         try:
             yield
         finally:
             if runtime is not None:
                 runtime.shutdown()
+                runtime = None
+                app.state.runtime = None
 
     app = FastAPI(title="Tri Timing Local Service", lifespan=lifespan)
 

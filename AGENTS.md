@@ -2,11 +2,13 @@
 
 ## Project Structure & Module Organization
 
-This repository currently contains planning and specification documents for a BLE-assisted triathlon/duathlon timing system.
+This repository contains a local Python timing core plus planning/specification documents for a BLE-assisted triathlon/duathlon timing system.
 
 - `docs/superpowers/specs/` contains approved design specs and presentation material.
 - `docs/superpowers/plans/` contains implementation plans.
-- Planned Python local core paths are `src/tri_timing/` and `tests/`.
+- `docs/local-core-acceptance.md` records the local-core acceptance checks.
+- `src/tri_timing/` contains the Python timing package.
+- `tests/` contains pytest coverage and fixtures.
 - Planned frontend/cloud code should use clear top-level directories such as `web/` for React admin/spectator UI and `cloudflare/` or `workers/` for Workers code.
 
 Keep source files focused by responsibility: config loading, route compilation, storage, detection, engine, scanner adapters, and CLI should remain separate modules.
@@ -23,9 +25,11 @@ uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes te
 
 For docs-only changes, verify links and read the rendered Markdown/HTML locally.
 
+Do not run Python commands directly when `uv run ...` works; this keeps dependencies and console scripts consistent with `uv.lock`.
+
 ## Coding Style & Naming Conventions
 
-Use Python 3.11+ for local timing code. Prefer small modules, dataclasses or Pydantic models for explicit data shapes, and deterministic functions for replayable logic.
+Use Python 3.11+ for local timing code. Prefer small modules, dataclasses for explicit data shapes, and deterministic functions for replayable logic.
 
 Naming examples:
 

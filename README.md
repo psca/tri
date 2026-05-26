@@ -35,6 +35,7 @@ Implemented so far:
 - [Local-core acceptance checklist](docs/acceptance/local-core.md)
 - [Cloud spectator acceptance checklist](docs/acceptance/cloud-spectator.md)
 - [Manual review/corrections acceptance checklist](docs/acceptance/manual-review-corrections.md)
+- [Next project roadmap](docs/roadmap/next.md)
 - [Contributor guide](AGENTS.md)
 
 ## Repository Layout

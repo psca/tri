@@ -7,7 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
 from tri_timing_service.broadcaster import EventBroadcaster
-from tri_timing_service.models import ManualCorrectionRequest, SyntheticDetectionRequest
+from tri_timing_service.models import (
+    DetectionIngestRequest,
+    ManualCorrectionRequest,
+    SyntheticDetectionRequest,
+)
 from tri_timing_service.runtime import RaceRuntime
 from tri_timing_service.settings import ServiceSettings
 
@@ -99,6 +103,20 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         broadcaster.publish_state(state)
         return state
+
+    @app.post("/api/detections")
+    async def ingest_detections(request: DetectionIngestRequest):
+        current_runtime = get_runtime()
+        try:
+            result = current_runtime.ingest_detections(request)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        broadcaster.publish_state(current_runtime.state())
+        return result
+
+    @app.get("/api/receivers/health")
+    async def receiver_health():
+        return get_runtime().receiver_health()
 
     @app.post("/api/corrections")
     async def create_correction(request: ManualCorrectionRequest):

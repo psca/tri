@@ -12,9 +12,14 @@ from tri_timing.store import EventStore
 from tri_timing_service.models import (
     AcceptedEventView,
     AthleteView,
+    DetectionAcceptedEventView,
+    DetectionIngestRequest,
+    DetectionIngestResponse,
     ManualCorrectionRequest,
     RaceStateView,
     RawDetectionView,
+    ReceiverHealthResponse,
+    ReceiverHealthView,
     SyntheticDetectionRequest,
 )
 from tri_timing_service.settings import ServiceSettings
@@ -38,6 +43,31 @@ class RaceRuntime:
         self._athletes = load_athletes(settings.athletes_path)
         self._route = compile_route(self._race_config)
         self._store = EventStore(database_path)
+        self._athletes_by_beacon = {
+            (
+                athlete.beacon_uuid.lower(),
+                athlete.beacon_major,
+                athlete.beacon_minor,
+            ): athlete
+            for athlete in self._athletes
+        }
+        self._checkpoint_by_receiver = {
+            receiver.id: receiver.checkpoint_id
+            for receiver in self._race_config.receivers
+        }
+        self._live_detectors: dict[tuple[str, str], PassDetector] = {}
+        self._receiver_health: dict[str, dict] = {
+            receiver.id: {
+                "receiver_id": receiver.id,
+                "checkpoint_id": receiver.checkpoint_id,
+                "last_packet_wall": None,
+                "last_packet_monotonic": None,
+                "known_packets": 0,
+                "unknown_packets": 0,
+                "latest_known_beacons": {},
+            }
+            for receiver in self._race_config.receivers
+        }
         self._engine = RaceEngine(
             race_id=self._race_config.race_id,
             route_events=self._route,
@@ -380,6 +410,157 @@ class RaceRuntime:
                 )
 
         return self.state()
+
+    def ingest_detections(
+        self, request: DetectionIngestRequest
+    ) -> DetectionIngestResponse:
+        checkpoint_id = self._checkpoint_by_receiver.get(request.receiver_id)
+        if checkpoint_id is None:
+            raise ValueError(f"unknown receiver: {request.receiver_id}")
+
+        stored = 0
+        ignored_unknown = 0
+        accepted_events: list[DetectionAcceptedEventView] = []
+
+        for detection in request.detections:
+            health = self._receiver_health[request.receiver_id]
+            health["last_packet_wall"] = detection.timestamp_wall
+            health["last_packet_monotonic"] = detection.timestamp_monotonic
+
+            athlete = self._athletes_by_beacon.get(
+                (
+                    detection.beacon_uuid.lower(),
+                    detection.beacon_major,
+                    detection.beacon_minor,
+                )
+            )
+            if athlete is None:
+                ignored_unknown += 1
+                health["unknown_packets"] += 1
+                continue
+
+            health["known_packets"] += 1
+            health["latest_known_beacons"][athlete.athlete_id] = {
+                "athlete_id": athlete.athlete_id,
+                "beacon_uuid": detection.beacon_uuid,
+                "beacon_major": detection.beacon_major,
+                "beacon_minor": detection.beacon_minor,
+                "rssi": detection.rssi,
+                "timestamp_wall": detection.timestamp_wall,
+            }
+
+            self._store.append_raw_detection(
+                race_id=self._race_config.race_id,
+                receiver_id=request.receiver_id,
+                checkpoint_id=checkpoint_id,
+                beacon_uuid=detection.beacon_uuid,
+                beacon_major=detection.beacon_major,
+                beacon_minor=detection.beacon_minor,
+                rssi=detection.rssi,
+                timestamp_wall=detection.timestamp_wall,
+                timestamp_monotonic=detection.timestamp_monotonic,
+                process_instance_id="receiver",
+            )
+            stored += 1
+
+            accepted = self._maybe_accept_detection(
+                athlete_id=athlete.athlete_id,
+                checkpoint_id=checkpoint_id,
+                rssi=detection.rssi,
+                timestamp_wall=detection.timestamp_wall,
+                timestamp_monotonic=detection.timestamp_monotonic,
+            )
+            if accepted is not None:
+                accepted_events.append(accepted)
+
+        return DetectionIngestResponse(
+            stored=stored,
+            ignored_unknown=ignored_unknown,
+            accepted_events=accepted_events,
+        )
+
+    def _maybe_accept_detection(
+        self,
+        *,
+        athlete_id: str,
+        checkpoint_id: str,
+        rssi: int,
+        timestamp_wall: str,
+        timestamp_monotonic: float,
+    ) -> DetectionAcceptedEventView | None:
+        if self._phase != "live":
+            return None
+
+        engine_state = self._engine.state_for(athlete_id)
+        if engine_state.next_route_event_index >= len(self._route):
+            return None
+
+        expected_event = self._route[engine_state.next_route_event_index]
+        if expected_event.checkpoint_id != checkpoint_id:
+            return None
+
+        detector_key = (athlete_id, expected_event.id)
+        detector = self._live_detectors.get(detector_key)
+        if detector is None:
+            detector = PassDetector(
+                self._race_config.detection_policies[
+                    expected_event.detection_policy_id
+                ]
+            )
+            self._live_detectors[detector_key] = detector
+
+        engine_timestamp = self._engine_timestamp(timestamp_monotonic)
+        candidate = detector.observe(
+            timestamp_sec=engine_timestamp,
+            rssi=rssi,
+        )
+        if candidate is None:
+            return None
+
+        decision = self._engine.apply_pass(athlete_id, checkpoint_id, candidate)
+        if decision.status != "accepted" or decision.route_event_id is None:
+            return None
+
+        self._store.append_accepted_route_event(
+            race_id=self._race_config.race_id,
+            athlete_id=athlete_id,
+            route_event_id=decision.route_event_id,
+            checkpoint_id=checkpoint_id,
+            pass_candidate_id=candidate.candidate_id,
+            event_time_wall=timestamp_wall,
+            confidence=candidate.confidence,
+        )
+        return DetectionAcceptedEventView(
+            athlete_id=athlete_id,
+            route_event_id=decision.route_event_id,
+        )
+
+    def _engine_timestamp(self, receiver_timestamp: float) -> float:
+        # Receiver processes can report monotonic timestamps from their own clock.
+        # Treat values before service race start as elapsed seconds since start.
+        race_start_sec = self._engine.race_start_sec
+        if race_start_sec is None or receiver_timestamp >= race_start_sec:
+            return receiver_timestamp
+        return race_start_sec + receiver_timestamp
+
+    def receiver_health(self) -> ReceiverHealthResponse:
+        receivers = []
+        for row in self._receiver_health.values():
+            status = "silent"
+            if row["last_packet_monotonic"] is not None:
+                status = "online"
+            receivers.append(
+                ReceiverHealthView(
+                    receiver_id=row["receiver_id"],
+                    checkpoint_id=row["checkpoint_id"],
+                    status=status,
+                    last_packet_wall=row["last_packet_wall"],
+                    known_packets=row["known_packets"],
+                    unknown_packets=row["unknown_packets"],
+                    latest_known_beacons=list(row["latest_known_beacons"].values()),
+                )
+            )
+        return ReceiverHealthResponse(receivers=receivers)
 
     def shutdown(self) -> None:
         self._store.close()

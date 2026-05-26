@@ -46,6 +46,54 @@ class SyntheticDetectionRequest(BaseModel):
     timestamp_sec: float | None = None
 
 
+class DetectionIngestItem(BaseModel):
+    beacon_uuid: str
+    beacon_major: int
+    beacon_minor: int
+    rssi: int
+    timestamp_wall: str
+    timestamp_monotonic: float
+
+
+class DetectionIngestRequest(BaseModel):
+    receiver_id: str
+    detections: list[DetectionIngestItem]
+
+
+class DetectionAcceptedEventView(BaseModel):
+    athlete_id: str
+    route_event_id: str
+
+
+class DetectionIngestResponse(BaseModel):
+    stored: int
+    ignored_unknown: int
+    accepted_events: list[DetectionAcceptedEventView]
+
+
+class ReceiverBeaconHealthView(BaseModel):
+    athlete_id: str
+    beacon_uuid: str
+    beacon_major: int
+    beacon_minor: int
+    rssi: int
+    timestamp_wall: str
+
+
+class ReceiverHealthView(BaseModel):
+    receiver_id: str
+    checkpoint_id: str
+    status: str
+    last_packet_wall: str | None
+    known_packets: int
+    unknown_packets: int
+    latest_known_beacons: list[ReceiverBeaconHealthView]
+
+
+class ReceiverHealthResponse(BaseModel):
+    receivers: list[ReceiverHealthView]
+
+
 class ManualCorrectionRequest(BaseModel):
     correction_type: str
     athlete_id: str

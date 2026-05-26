@@ -803,3 +803,96 @@ def test_post_correction_rejects_target_from_invalid_raw_manual_add(tmp_path) ->
 
     assert response.status_code == 400
     assert response.json()["detail"] == "target event does not exist"
+
+
+def _detection_payload(
+    *, minor: int = 1, rssi: int = -55, timestamp_sec: float = 500
+):
+    return {
+        "receiver_id": "laptop-dongle-1",
+        "detections": [
+            {
+                "beacon_uuid": "11111111-1111-1111-1111-111111111111",
+                "beacon_major": 1,
+                "beacon_minor": minor,
+                "rssi": rssi,
+                "timestamp_wall": "2026-05-26T09:00:00+08:00",
+                "timestamp_monotonic": timestamp_sec,
+            }
+        ],
+    }
+
+
+def test_detection_ingest_stores_known_raw_detection(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post("/api/detections", json=_detection_payload())
+        state = client.get("/api/race/state").json()
+
+    assert response.status_code == 200
+    assert response.json()["stored"] == 1
+    assert state["raw_detections"][0]["receiver_id"] == "laptop-dongle-1"
+    assert state["raw_detections"][0]["checkpoint_id"] == "gate"
+
+
+def test_detection_ingest_advances_live_race_after_candidate_closes(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        for offset, rssi in [(500, -55), (501, -54), (502, -53), (506, -83)]:
+            response = client.post(
+                "/api/detections",
+                json=_detection_payload(rssi=rssi, timestamp_sec=offset),
+            )
+        state = client.get("/api/race/state").json()
+
+    assert response.status_code == 200
+    assert response.json()["accepted_events"][0]["route_event_id"] == (
+        "run1_lap1_complete"
+    )
+    assert state["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+
+
+def test_detection_ingest_rejects_unknown_receiver(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        payload = _detection_payload()
+        payload["receiver_id"] = "unknown"
+        response = client.post("/api/detections", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unknown receiver: unknown"
+
+
+def test_detection_ingest_counts_unknown_beacon_without_raw_detection(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post("/api/detections", json=_detection_payload(minor=99))
+        health = client.get("/api/receivers/health").json()
+        state = client.get("/api/race/state").json()
+
+    assert response.status_code == 200
+    assert response.json()["stored"] == 0
+    assert response.json()["ignored_unknown"] == 1
+    assert state["raw_detections"] == []
+    assert health["receivers"][0]["unknown_packets"] == 1
+
+
+def test_receiver_health_reports_online_receiver(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/detections", json=_detection_payload())
+        response = client.get("/api/receivers/health")
+
+    assert response.status_code == 200
+    receiver = response.json()["receivers"][0]
+    assert receiver["receiver_id"] == "laptop-dongle-1"
+    assert receiver["checkpoint_id"] == "gate"
+    assert receiver["status"] == "online"
+    assert receiver["known_packets"] == 1
+    assert receiver["latest_known_beacons"][0]["athlete_id"] == "A001"

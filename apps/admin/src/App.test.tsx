@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import { getReviewState, submitCorrection } from "./api";
@@ -29,25 +29,39 @@ class MockEventSource {
 beforeEach(() => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        race_id: "duathlon-001",
-        phase: "pre_start",
-        athletes: [
-          {
-            athlete_id: "A001",
-            name: "Bob",
-            bib_number: "1",
-            next_event_id: "run1_lap1_complete",
-            status: "racing",
-          },
-        ],
-        accepted_events: [],
-        raw_detections: [],
-        warnings: [],
-      }),
-    })),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      const payload = path.includes("/api/review/state")
+        ? {
+            race_id: "duathlon-demo",
+            phase: "pre_start",
+            route_events: [],
+            athletes: [],
+            correction_log: [],
+            warnings: [],
+            raw_detections: [],
+          }
+        : {
+            race_id: "duathlon-001",
+            phase: "pre_start",
+            athletes: [
+              {
+                athlete_id: "A001",
+                name: "Bob",
+                bib_number: "1",
+                next_event_id: "run1_lap1_complete",
+                status: "racing",
+              },
+            ],
+            accepted_events: [],
+            raw_detections: [],
+            warnings: [],
+          };
+      return {
+        ok: true,
+        json: async () => payload,
+      };
+    }),
   );
   vi.stubGlobal("EventSource", MockEventSource);
   MockEventSource.last = null;
@@ -170,4 +184,137 @@ test("getReviewState fetches review state", async () => {
     expect.objectContaining({ headers: { "content-type": "application/json" } }),
   );
   fetchMock.mockRestore();
+});
+
+test("review mode renders athlete timeline and correction actions", async () => {
+  vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+    const path = String(input);
+    const payload = path.includes("/api/review/state")
+      ? {
+          race_id: "duathlon-demo",
+          phase: "live",
+          route_events: [{ id: "run1_lap1_complete", label: "Run 1 Lap 1", index: 1 }],
+          athletes: [
+            {
+              athlete_id: "A001",
+              name: "Bob",
+              bib_number: "1",
+              status: "racing",
+              next_event_id: "run1_lap1_complete",
+              completed_count: 0,
+              total_count: 1,
+              attention_level: "needs_attention",
+              badges: ["missing pass"],
+              timeline: [
+                {
+                  route_event_id: "run1_lap1_complete",
+                  label: "Run 1 Lap 1",
+                  status: "missing",
+                  timestamp: null,
+                  confidence: null,
+                  source: "none",
+                },
+              ],
+            },
+          ],
+          correction_log: [],
+          warnings: [],
+          raw_detections: [],
+        }
+      : {
+          race_id: "duathlon-001",
+          phase: "live",
+          athletes: [],
+          accepted_events: [],
+          raw_detections: [],
+          warnings: [],
+        };
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("tab", { name: "Review" }));
+
+  expect(await screen.findByRole("button", { name: /Bob/ })).toBeInTheDocument();
+  expect(screen.getByText("Run 1 Lap 1")).toBeInTheDocument();
+  expect(screen.getByRole("radio", { name: "Add missing pass" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Reason")).toBeRequired();
+});
+
+test("review mode submits a manual add pass correction", async () => {
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === "/api/corrections") {
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        correction_type: "manual_add_pass",
+        athlete_id: "A001",
+        route_event_id: "run1_lap1_complete",
+        corrected_time_wall: "2026-05-25T09:10:00+08:00",
+        reason: "Saw athlete cross",
+        created_by: "operator",
+      });
+    }
+
+    const reviewPayload = {
+      race_id: "duathlon-demo",
+      phase: "live",
+      route_events: [{ id: "run1_lap1_complete", label: "Run 1 Lap 1", index: 1 }],
+      athletes: [
+        {
+          athlete_id: "A001",
+          name: "Bob",
+          bib_number: "1",
+          status: "racing",
+          next_event_id: "run1_lap1_complete",
+          completed_count: 0,
+          total_count: 1,
+          attention_level: "needs_attention",
+          badges: [],
+          timeline: [
+            {
+              route_event_id: "run1_lap1_complete",
+              label: "Run 1 Lap 1",
+              status: "missing",
+              timestamp: null,
+              confidence: null,
+              source: "none",
+            },
+          ],
+        },
+      ],
+      correction_log: [],
+      warnings: [],
+      raw_detections: [],
+    };
+    const racePayload = {
+      race_id: "duathlon-001",
+      phase: "live",
+      athletes: [],
+      accepted_events: [],
+      raw_detections: [],
+      warnings: [],
+    };
+    return new Response(JSON.stringify(path.includes("/api/race/state") ? racePayload : reviewPayload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole("tab", { name: "Review" }));
+  fireEvent.change(await screen.findByLabelText("Corrected time"), {
+    target: { value: "2026-05-25T09:10:00+08:00" },
+  });
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Saw athlete cross" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit correction" }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/corrections", expect.any(Object)));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/review/state").length).toBeGreaterThanOrEqual(3),
+  );
 });

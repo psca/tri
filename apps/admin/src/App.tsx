@@ -1,14 +1,40 @@
 import { useEffect, useState } from "react";
-import { closeRace, getRaceState, sendSyntheticDetection, startRace } from "./api";
-import type { RaceStateView } from "./types";
+import {
+  closeRace,
+  getRaceState,
+  getReviewState,
+  sendSyntheticDetection,
+  startRace,
+  submitCorrection,
+} from "./api";
+import type { ManualCorrectionRequest, RaceStateView, ReviewAthlete, ReviewState, ReviewTimelineEvent } from "./types";
 import "./styles.css";
+
+type Mode = "live" | "review";
+type CorrectionType = ManualCorrectionRequest["correction_type"];
+
+const correctionLabels: Record<CorrectionType, string> = {
+  manual_add_pass: "Add missing pass",
+  manual_reject_pass: "Reject pass",
+  manual_override_time: "Override time",
+  mark_status: "Mark status",
+};
 
 export function App() {
   const [state, setState] = useState<RaceStateView | null>(null);
+  const [reviewState, setReviewState] = useState<ReviewState | null>(null);
+  const [mode, setMode] = useState<Mode>("live");
+  const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
+  const [selectedRouteEventId, setSelectedRouteEventId] = useState<string | null>(null);
+  const [correctionType, setCorrectionType] = useState<CorrectionType>("manual_add_pass");
+  const [correctedTime, setCorrectedTime] = useState("");
+  const [status, setStatus] = useState("dnf");
+  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     getRaceState().then(setState).catch((err: Error) => setError(err.message));
+    refreshReview();
   }, []);
 
   useEffect(() => {
@@ -16,11 +42,34 @@ export function App() {
     events.addEventListener("state", (event) => {
       setState(JSON.parse(event.data) as RaceStateView);
     });
+    events.addEventListener("review_state", (event) => {
+      applyReviewState(JSON.parse(event.data) as ReviewState);
+    });
     events.onerror = () => {
       setError("Live event stream disconnected");
     };
     return () => events.close();
   }, []);
+
+  useEffect(() => {
+    if (mode === "review") {
+      refreshReview();
+    }
+  }, [mode]);
+
+  function applyReviewState(nextState: ReviewState) {
+    setReviewState(nextState);
+    setSelectedAthleteId((current) => current ?? nextState.athletes?.[0]?.athlete_id ?? null);
+    setSelectedRouteEventId((current) => current ?? nextState.route_events?.[0]?.id ?? null);
+  }
+
+  async function refreshReview() {
+    try {
+      applyReviewState(await getReviewState());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
 
   async function run(action: () => Promise<RaceStateView>) {
     setError(null);
@@ -32,6 +81,55 @@ export function App() {
     }
   }
 
+  async function sendCorrection() {
+    setError(null);
+
+    if (!selectedAthleteId) {
+      setError("Select an athlete before correcting.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("Reason is required for manual corrections.");
+      return;
+    }
+
+    const selectedEvent = selectedTimelineEvent(reviewState, selectedAthleteId, selectedRouteEventId);
+    const payload: ManualCorrectionRequest = {
+      correction_type: correctionType,
+      athlete_id: selectedAthleteId,
+      route_event_id: correctionType === "mark_status" ? null : selectedRouteEventId,
+      reason: reason.trim(),
+      created_by: "operator",
+    };
+
+    if (correctionType === "manual_add_pass" || correctionType === "manual_override_time") {
+      payload.corrected_time_wall = correctedTime;
+    }
+    if (correctionType === "manual_reject_pass") {
+      payload.target_local_sequence_number = selectedEvent?.accepted_local_sequence_number ?? null;
+    }
+    if (correctionType === "mark_status") {
+      payload.status = status;
+    }
+
+    try {
+      applyReviewState(await submitCorrection(payload));
+      setReason("");
+      await refreshReview();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
+  const selectedAthlete =
+    reviewState?.athletes.find((athlete) => athlete.athlete_id === selectedAthleteId) ??
+    reviewState?.athletes[0] ??
+    null;
+  const selectedEvent =
+    selectedAthlete?.timeline.find((event) => event.route_event_id === selectedRouteEventId) ??
+    selectedAthlete?.timeline[0] ??
+    null;
+
   return (
     <main className="shell">
       <section className="hero">
@@ -41,52 +139,201 @@ export function App() {
           Phase: <strong>{state?.phase ?? "connecting"}</strong>
         </p>
         {error ? <p role="alert">{error}</p> : null}
+        <div className="mode-tabs" role="tablist" aria-label="Admin mode">
+          <button
+            aria-selected={mode === "live"}
+            role="tab"
+            className={mode === "live" ? "active" : ""}
+            onClick={() => setMode("live")}
+          >
+            Live
+          </button>
+          <button
+            aria-selected={mode === "review"}
+            role="tab"
+            className={mode === "review" ? "active" : ""}
+            onClick={() => setMode("review")}
+          >
+            Review
+          </button>
+        </div>
         <div className="controls">
           <button onClick={() => run(startRace)}>Start Race</button>
           <button onClick={() => run(closeRace)}>Close Race</button>
         </div>
       </section>
 
-      <section className="panel">
-        <h2>Athletes</h2>
-        {state?.athletes.map((athlete) => (
-          <article className="athlete" key={athlete.athlete_id}>
-            <div>
-              <strong>{athlete.name}</strong>
-              <span>{athlete.next_event_id ?? "finished"}</span>
-            </div>
-            <button onClick={() => run(() => sendSyntheticDetection(athlete.athlete_id, "gate"))}>
-              Synthetic Pass
-            </button>
-          </article>
-        ))}
-      </section>
+      {mode === "live" ? (
+        <>
+          <section className="panel">
+            <h2>Athletes</h2>
+            {state?.athletes.map((athlete) => (
+              <article className="athlete" key={athlete.athlete_id}>
+                <div>
+                  <strong>{athlete.name}</strong>
+                  <span>{athlete.next_event_id ?? "finished"}</span>
+                </div>
+                <button onClick={() => run(() => sendSyntheticDetection(athlete.athlete_id, "gate"))}>
+                  Synthetic Pass
+                </button>
+              </article>
+            ))}
+          </section>
 
-      <section className="panel">
-        <h2>Accepted Events</h2>
-        {state?.accepted_events.length ? (
-          state.accepted_events.map((event) => (
-            <p key={`${event.athlete_id}-${event.route_event_id}`}>
-              {event.athlete_id} · {event.route_event_id}
-            </p>
-          ))
-        ) : (
-          <p>No accepted events yet.</p>
-        )}
-      </section>
+          <section className="panel">
+            <h2>Accepted Events</h2>
+            {state?.accepted_events.length ? (
+              state.accepted_events.map((event) => (
+                <p key={`${event.athlete_id}-${event.route_event_id}`}>
+                  {event.athlete_id} · {event.route_event_id}
+                </p>
+              ))
+            ) : (
+              <p>No accepted events yet.</p>
+            )}
+          </section>
 
-      <section className="panel">
-        <h2>Recent Detections</h2>
-        {state?.raw_detections.length ? (
-          state.raw_detections.map((detection) => (
-            <p key={detection.local_sequence_number}>
-              {detection.receiver_id} · {detection.checkpoint_id} · {detection.rssi} dBm
+          <section className="panel">
+            <h2>Recent Detections</h2>
+            {state?.raw_detections.length ? (
+              state.raw_detections.map((detection) => (
+                <p key={detection.local_sequence_number}>
+                  {detection.receiver_id} · {detection.checkpoint_id} · {detection.rssi} dBm
+                </p>
+              ))
+            ) : (
+              <p>No raw detections yet.</p>
+            )}
+          </section>
+        </>
+      ) : (
+        <section className="review-grid">
+          <section className="panel">
+            <h2>Review Queue</h2>
+            {reviewState?.athletes.length ? (
+              reviewState.athletes.map((athlete) => (
+                <AthleteReviewButton
+                  athlete={athlete}
+                  isSelected={athlete.athlete_id === selectedAthlete?.athlete_id}
+                  key={athlete.athlete_id}
+                  onSelect={() => {
+                    setSelectedAthleteId(athlete.athlete_id);
+                    setSelectedRouteEventId(athlete.timeline[0]?.route_event_id ?? null);
+                  }}
+                />
+              ))
+            ) : (
+              <p>No athletes in review state.</p>
+            )}
+          </section>
+
+          <section className="panel timeline-panel">
+            <h2>{selectedAthlete ? `${selectedAthlete.name} Timeline` : "Timeline"}</h2>
+            {selectedAthlete?.timeline.map((event) => (
+              <button
+                className={event.route_event_id === selectedEvent?.route_event_id ? "timeline-event active" : "timeline-event"}
+                key={event.route_event_id}
+                onClick={() => setSelectedRouteEventId(event.route_event_id)}
+              >
+                <strong>{event.label}</strong>
+                <span>{event.status}</span>
+                <span>{event.timestamp ?? "No time"}</span>
+              </button>
+            ))}
+          </section>
+
+          <section className="panel correction-panel">
+            <h2>Correction</h2>
+            <p>
+              {selectedAthlete?.name ?? "No athlete"} · {selectedEvent?.label ?? "No route event"}
             </p>
-          ))
-        ) : (
-          <p>No raw detections yet.</p>
-        )}
-      </section>
+            <fieldset>
+              <legend>Action</legend>
+              {(Object.keys(correctionLabels) as CorrectionType[]).map((type) => (
+                <label key={type}>
+                  <input
+                    checked={correctionType === type}
+                    name="correction_type"
+                    onChange={() => setCorrectionType(type)}
+                    type="radio"
+                  />
+                  {correctionLabels[type]}
+                </label>
+              ))}
+            </fieldset>
+            {(correctionType === "manual_add_pass" || correctionType === "manual_override_time") && (
+              <label>
+                Corrected time
+                <input
+                  onChange={(event) => setCorrectedTime(event.target.value)}
+                  placeholder="2026-05-25T09:10:00+08:00"
+                  value={correctedTime}
+                />
+              </label>
+            )}
+            {correctionType === "mark_status" && (
+              <label>
+                Status
+                <select onChange={(event) => setStatus(event.target.value)} value={status}>
+                  <option value="dnf">DNF</option>
+                  <option value="dq">DQ</option>
+                  <option value="racing">Racing</option>
+                  <option value="finished">Finished</option>
+                </select>
+              </label>
+            )}
+            <label>
+              Reason
+              <textarea
+                onChange={(event) => setReason(event.target.value)}
+                required
+                rows={4}
+                value={reason}
+              />
+            </label>
+            <button onClick={sendCorrection}>Submit correction</button>
+          </section>
+        </section>
+      )}
     </main>
+  );
+}
+
+function selectedTimelineEvent(
+  reviewState: ReviewState | null,
+  athleteId: string | null,
+  routeEventId: string | null,
+): ReviewTimelineEvent | null {
+  return (
+    reviewState?.athletes
+      .find((athlete) => athlete.athlete_id === athleteId)
+      ?.timeline.find((event) => event.route_event_id === routeEventId) ?? null
+  );
+}
+
+function AthleteReviewButton({
+  athlete,
+  isSelected,
+  onSelect,
+}: {
+  athlete: ReviewAthlete;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button className={isSelected ? "review-athlete active" : "review-athlete"} onClick={onSelect}>
+      <span>
+        <strong>
+          {athlete.bib_number ? `#${athlete.bib_number} ` : ""}
+          {athlete.name}
+        </strong>
+        <small>
+          {athlete.completed_count}/{athlete.total_count} · {athlete.status}
+        </small>
+      </span>
+      <span className={athlete.attention_level === "needs_attention" ? "badge warn" : "badge"}>
+        {athlete.badges[0] ?? athlete.attention_level}
+      </span>
+    </button>
   );
 }

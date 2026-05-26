@@ -26,11 +26,49 @@ button:hover {
   background: #0a493f;
 }
 
+input,
+select,
+textarea {
+  border: 1px solid rgba(22, 35, 31, 0.2);
+  border-radius: 14px;
+  box-sizing: border-box;
+  color: #16231f;
+  font: inherit;
+  padding: 0.7rem 0.8rem;
+  width: 100%;
+}
+
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+fieldset {
+  border: 1px solid rgba(22, 35, 31, 0.14);
+  border-radius: 18px;
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 1rem;
+}
+
+fieldset label {
+  align-items: center;
+  display: flex;
+  font-weight: 600;
+}
+
+fieldset input {
+  margin-right: 0.5rem;
+  width: auto;
+}
+
 .shell {
   display: grid;
   gap: 1rem;
   margin: 0 auto;
-  max-width: 960px;
+  max-width: 1180px;
   min-height: 100vh;
   padding: 2rem;
 }
@@ -69,8 +107,26 @@ button:hover {
   gap: 1rem;
 }
 
-.controls {
+.controls,
+.mode-tabs {
   flex-wrap: wrap;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.mode-tabs button {
+  background: rgba(13, 92, 79, 0.12);
+  box-shadow: none;
+  color: #0d5c4f;
+}
+
+.mode-tabs button.active {
+  background: #0d5c4f;
+  color: white;
 }
 
 .athlete {
@@ -86,13 +142,79 @@ button:hover {
   margin-top: 0.25rem;
 }
 
+.review-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.15fr) minmax(280px, 1fr);
+}
+
+.review-athlete,
+.timeline-event {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(22, 35, 31, 0.12);
+  border-radius: 18px;
+  box-shadow: none;
+  color: #16231f;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+  text-align: left;
+  width: 100%;
+}
+
+.review-athlete.active,
+.timeline-event.active {
+  background: #fff9eb;
+  border-color: #d46f38;
+}
+
+.review-athlete small,
+.timeline-event span {
+  color: #596862;
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.badge {
+  align-self: center;
+  background: rgba(13, 92, 79, 0.12);
+  border-radius: 999px;
+  color: #0d5c4f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.35rem 0.55rem;
+}
+
+.badge.warn {
+  background: rgba(212, 111, 56, 0.18);
+  color: #9a4325;
+}
+
+.timeline-panel,
+.correction-panel {
+  align-self: start;
+}
+
+.correction-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 @media (max-width: 640px) {
   .shell {
     padding: 1rem;
   }
 
-  .athlete {
+  .athlete,
+  .review-grid {
     align-items: stretch;
+  }
+
+  .athlete {
     flex-direction: column;
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
   }
 }

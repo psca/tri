@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { getReviewState, submitCorrection } from "./api";
 import type { RaceStateView } from "./types";
 
 class MockEventSource {
@@ -98,4 +99,75 @@ test("subscribes to event stream and applies state messages", async () => {
   expect(screen.getByText("live")).toBeInTheDocument();
   expect(screen.getByText("run1_lap2_complete")).toBeInTheDocument();
   expect(screen.getByText("admin · gate · -55 dBm")).toBeInTheDocument();
+});
+
+test("submitCorrection posts correction payload and returns review state", async () => {
+  const reviewState = {
+    race_id: "duathlon-demo",
+    phase: "live",
+    athletes: [],
+    route_events: [],
+    correction_log: [],
+    warnings: [],
+    raw_detections: [],
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    new Response(JSON.stringify(reviewState), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+
+  await expect(
+    submitCorrection({
+      correction_type: "manual_add_pass",
+      athlete_id: "A001",
+      route_event_id: "run1_lap1_complete",
+      corrected_time_wall: "2026-05-25T09:10:00+08:00",
+      reason: "Saw athlete cross",
+      created_by: "operator",
+    }),
+  ).resolves.toEqual(reviewState);
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/corrections",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        correction_type: "manual_add_pass",
+        athlete_id: "A001",
+        route_event_id: "run1_lap1_complete",
+        corrected_time_wall: "2026-05-25T09:10:00+08:00",
+        reason: "Saw athlete cross",
+        created_by: "operator",
+      }),
+    }),
+  );
+  fetchMock.mockRestore();
+});
+
+test("getReviewState fetches review state", async () => {
+  const reviewState = {
+    race_id: "duathlon-demo",
+    phase: "live",
+    athletes: [],
+    route_events: [],
+    correction_log: [],
+    warnings: [],
+    raw_detections: [],
+  };
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    new Response(JSON.stringify(reviewState), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+
+  await expect(getReviewState()).resolves.toEqual(reviewState);
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/review/state",
+    expect.objectContaining({ headers: { "content-type": "application/json" } }),
+  );
+  fetchMock.mockRestore();
 });

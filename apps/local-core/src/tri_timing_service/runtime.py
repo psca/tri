@@ -577,12 +577,14 @@ class RaceRuntime:
                 if now_monotonic is not None
                 else row["last_seen_service_monotonic"]
             )
-            if (
-                last_seen_monotonic is not None
-                and current_monotonic - last_seen_monotonic
-                <= RECEIVER_ONLINE_TIMEOUT_SEC
-            ):
-                status = "online"
+            if last_seen_monotonic is not None:
+                if (
+                    current_monotonic - last_seen_monotonic
+                    <= RECEIVER_ONLINE_TIMEOUT_SEC
+                ):
+                    status = "online"
+                else:
+                    status = "stale"
             receivers.append(
                 ReceiverHealthView(
                     receiver_id=row["receiver_id"],

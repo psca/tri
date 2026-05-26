@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -83,7 +85,7 @@ class ReceiverBeaconHealthView(BaseModel):
 class ReceiverHealthView(BaseModel):
     receiver_id: str
     checkpoint_id: str
-    status: str
+    status: Literal["online", "stale", "silent"]
     last_packet_wall: str | None
     known_packets: int
     unknown_packets: int

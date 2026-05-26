@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Sequence
 
 import httpx
 
@@ -14,10 +15,7 @@ BeaconKey = tuple[str, int, int]
 
 
 @dataclass(frozen=True)
-class ReceiverObservation:
-    receiver_id: str
-    checkpoint_id: str
-    athlete_id: str
+class ReceiverUploadDetection:
     beacon_uuid: str
     beacon_major: int
     beacon_minor: int
@@ -27,6 +25,13 @@ class ReceiverObservation:
 
     def to_payload(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ReceiverObservation(ReceiverUploadDetection):
+    receiver_id: str
+    checkpoint_id: str
+    athlete_id: str
 
 
 def build_beacon_lookup(athletes: list[AthleteConfig]) -> dict[BeaconKey, AthleteConfig]:
@@ -71,9 +76,26 @@ def observation_from_ibeacon(
         return None
 
     return ReceiverObservation(
+        beacon_uuid=beacon.uuid.lower(),
+        beacon_major=beacon.major,
+        beacon_minor=beacon.minor,
+        rssi=rssi,
+        timestamp_wall=timestamp_wall,
+        timestamp_monotonic=timestamp_monotonic,
         receiver_id=receiver_id,
         checkpoint_id=checkpoint_for_receiver(race, receiver_id),
         athlete_id=athlete.athlete_id,
+    )
+
+
+def upload_detection_from_ibeacon(
+    *,
+    beacon: IBeaconAdvertisement,
+    rssi: int,
+    timestamp_wall: str,
+    timestamp_monotonic: float,
+) -> ReceiverUploadDetection:
+    return ReceiverUploadDetection(
         beacon_uuid=beacon.uuid.lower(),
         beacon_major=beacon.major,
         beacon_minor=beacon.minor,
@@ -84,7 +106,7 @@ def observation_from_ibeacon(
 
 
 def write_observations_jsonl(
-    path: Path, observations: list[ReceiverObservation]
+    path: Path, observations: Sequence[ReceiverUploadDetection]
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as file:
@@ -99,7 +121,7 @@ class ReceiverUploader:
         self._client = client or httpx.Client()
 
     def upload(
-        self, receiver_id: str, observations: list[ReceiverObservation]
+        self, receiver_id: str, observations: Sequence[ReceiverUploadDetection]
     ) -> object:
         response = self._client.post(
             f"{self._service_url}/api/detections",

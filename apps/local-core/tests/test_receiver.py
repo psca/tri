@@ -8,15 +8,21 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tri_timing.ble_receiver import _PendingObservationQueue, _flush_and_upload_pending
+from tri_timing.ble_receiver import (
+    _PendingObservationQueue,
+    _flush_and_upload_pending,
+    validate_receiver_id,
+)
 from tri_timing.config import load_athletes, load_race_config
 from tri_timing.ibeacon import IBeaconAdvertisement
 from tri_timing.models import AthleteConfig
 from tri_timing.receiver import (
     ReceiverObservation,
+    ReceiverUploadDetection,
     ReceiverUploader,
     build_beacon_lookup,
     observation_from_ibeacon,
+    upload_detection_from_ibeacon,
     write_observations_jsonl,
 )
 
@@ -114,6 +120,29 @@ def test_observation_from_ibeacon_filters_unknown_beacons() -> None:
     assert known.athlete_id == "A001"
     assert known.checkpoint_id == "gate"
     assert unknown is None
+
+
+def test_upload_detection_from_ibeacon_keeps_unknown_beacon_uploadable() -> None:
+    detection = upload_detection_from_ibeacon(
+        beacon=IBeaconAdvertisement(
+            uuid="22222222-2222-2222-2222-222222222222",
+            major=1,
+            minor=99,
+            measured_power=-59,
+        ),
+        rssi=-70,
+        timestamp_wall="2026-05-26T09:00:01+08:00",
+        timestamp_monotonic=101.5,
+    )
+
+    assert detection.to_payload() == {
+        "beacon_uuid": "22222222-2222-2222-2222-222222222222",
+        "beacon_major": 1,
+        "beacon_minor": 99,
+        "rssi": -70,
+        "timestamp_wall": "2026-05-26T09:00:01+08:00",
+        "timestamp_monotonic": 101.5,
+    }
 
 
 def test_write_observations_jsonl_appends_one_json_object_per_line(tmp_path: Path) -> None:
@@ -226,7 +255,14 @@ def test_upload_backlog_drops_oldest_after_jsonl_persistence(
 
 
 def test_receiver_uploader_posts_detections_and_returns_json() -> None:
-    observation = _receiver_observation()
+    detection = ReceiverUploadDetection(
+        beacon_uuid="22222222-2222-2222-2222-222222222222",
+        beacon_major=1,
+        beacon_minor=99,
+        rssi=-70,
+        timestamp_wall="2026-05-26T09:00:01+08:00",
+        timestamp_monotonic=101.5,
+    )
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -238,18 +274,18 @@ def test_receiver_uploader_posts_detections_and_returns_json() -> None:
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    result = uploader.upload("laptop-dongle-1", [observation])
+    result = uploader.upload("laptop-dongle-1", [detection])
 
     assert result == {"accepted": 1}
     assert requests[0].url == "http://local.test/api/detections"
     assert json.loads(requests[0].content) == {
         "receiver_id": "laptop-dongle-1",
-        "detections": [observation.to_payload()],
+        "detections": [detection.to_payload()],
     }
 
 
 def test_receiver_uploader_raises_http_status_error_on_server_error() -> None:
-    observation = _receiver_observation()
+    detection = _receiver_observation()
     uploader = ReceiverUploader(
         "http://local.test",
         client=httpx.Client(
@@ -260,7 +296,14 @@ def test_receiver_uploader_raises_http_status_error_on_server_error() -> None:
     )
 
     with pytest.raises(httpx.HTTPStatusError):
-        uploader.upload("laptop-dongle-1", [observation])
+        uploader.upload("laptop-dongle-1", [detection])
+
+
+def test_validate_receiver_id_rejects_unknown_receiver_before_scanning() -> None:
+    race = load_race_config(Path("tests/fixtures/race.yaml"))
+
+    with pytest.raises(ValueError, match="unknown receiver: unknown"):
+        validate_receiver_id(race, "unknown")
 
 
 def test_receiver_command_is_registered() -> None:

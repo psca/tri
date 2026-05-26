@@ -983,4 +983,4 @@ def test_receiver_health_reports_stale_receiver_without_sleeping(tmp_path) -> No
         client.post("/api/detections", json=_detection_payload(timestamp_sec=100))
         health = app.state.runtime.receiver_health(now_monotonic=200)
 
-    assert health.receivers[0].status == "silent"
+    assert health.receivers[0].status == "stale"

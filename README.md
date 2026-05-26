@@ -35,6 +35,7 @@ Implemented so far:
 - [Local-core acceptance checklist](docs/acceptance/local-core.md)
 - [Cloud spectator acceptance checklist](docs/acceptance/cloud-spectator.md)
 - [Manual review/corrections acceptance checklist](docs/acceptance/manual-review-corrections.md)
+- [Real BLE receiver acceptance checklist](docs/acceptance/real-ble-receiver.md)
 - [Next project roadmap](docs/roadmap/next.md)
 - [Contributor guide](AGENTS.md)
 
@@ -85,6 +86,12 @@ uv run tri-timing synthetic-replay \
   --race tests/fixtures/race.yaml \
   --athletes tests/fixtures/athletes.csv \
   --output /tmp/tri-timing-result.json
+uv run tri-timing receiver-run \
+  --race tests/fixtures/race.yaml \
+  --athletes tests/fixtures/athletes.csv \
+  --receiver-id laptop-dongle-1 \
+  --service-url http://127.0.0.1:8000 \
+  --jsonl-log /tmp/tri-receiver.jsonl
 uv run uvicorn tri_timing_service.app:create_app --factory --reload
 ```
 

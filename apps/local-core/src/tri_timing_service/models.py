@@ -53,5 +53,5 @@ class ManualCorrectionRequest(BaseModel):
     target_local_sequence_number: int | None = None
     corrected_time_wall: str | None = None
     status: str | None = None
-    reason: str
+    reason: str | None = None
     created_by: str = "operator"

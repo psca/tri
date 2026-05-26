@@ -543,6 +543,25 @@ def test_post_correction_rejects_blank_reason(tmp_path) -> None:
     assert response.json()["detail"] == "reason is required"
 
 
+def test_post_correction_rejects_omitted_reason_as_bad_request(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "mark_status",
+                "athlete_id": "A001",
+                "status": "dnf",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "reason is required"
+
+
 def test_post_correction_rejects_missing_target_event(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
@@ -561,6 +580,67 @@ def test_post_correction_rejects_missing_target_event(tmp_path) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "target event does not exist"
+
+
+def test_post_correction_accepts_overridden_event_as_target(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+            },
+        )
+        review = client.get("/api/review/state").json()
+        target_sequence = review["athletes"][0]["timeline"][0][
+            "accepted_local_sequence_number"
+        ]
+
+        first_override = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_override_time",
+                "athlete_id": "A001",
+                "target_local_sequence_number": target_sequence,
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Use camera time",
+                "created_by": "operator",
+            },
+        )
+        first_override_timeline = first_override.json()["athletes"][0]["timeline"][0]
+        override_sequence = first_override_timeline["correction_sequence_numbers"][0]
+
+        second_override = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_override_time",
+                "athlete_id": "A001",
+                "target_local_sequence_number": target_sequence,
+                "corrected_time_wall": "2026-05-25T09:11:00+08:00",
+                "reason": "Refine camera time",
+                "created_by": "operator",
+            },
+        )
+        reject_override = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_reject_pass",
+                "athlete_id": "A001",
+                "target_local_sequence_number": override_sequence,
+                "reason": "Camera showed wrong athlete",
+                "created_by": "operator",
+            },
+        )
+
+    assert first_override.status_code == 200
+    assert second_override.status_code == 200
+    assert reject_override.status_code == 200
 
 
 def test_post_correction_rejects_target_from_invalid_raw_manual_add(tmp_path) -> None:

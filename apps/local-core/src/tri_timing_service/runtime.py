@@ -148,7 +148,7 @@ class RaceRuntime:
         ):
             raise ValueError(f"unknown route event: {request.route_event_id}")
 
-        if not request.reason.strip():
+        if request.reason is None or not request.reason.strip():
             raise ValueError("reason is required")
 
         if request.correction_type == "manual_add_pass":
@@ -197,10 +197,11 @@ class RaceRuntime:
             if athlete.athlete_id != athlete_id:
                 continue
             for event in athlete.timeline:
-                if event.status == "accepted" and event.accepted_local_sequence_number:
+                if event.status not in {"accepted", "manual", "overridden"}:
+                    continue
+                if event.accepted_local_sequence_number is not None:
                     target_sequences.add(event.accepted_local_sequence_number)
-                elif event.status == "manual":
-                    target_sequences.update(event.correction_sequence_numbers)
+                target_sequences.update(event.correction_sequence_numbers)
             break
         return target_sequences
 

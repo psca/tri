@@ -47,6 +47,7 @@ class RaceRuntime:
         self._hydrate_engine_from_store()
         self._phase = self._store.metadata("phase") or "pre_start"
         self._restore_engine_phase()
+        self._sync_engine_state_from_review_for_all_athletes(self.review_state())
 
     @classmethod
     def create(
@@ -259,6 +260,15 @@ class RaceRuntime:
             state.status = review_athlete.status
         else:
             state.status = "racing"
+
+    def _sync_engine_state_from_review_for_all_athletes(
+        self, review: ReviewState
+    ) -> None:
+        for athlete in self._athletes:
+            self._sync_engine_state_from_review(
+                athlete_id=athlete.athlete_id,
+                review=review,
+            )
 
     def start(self) -> RaceStateView:
         if self._phase == "pre_start":

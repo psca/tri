@@ -102,11 +102,13 @@ def create_app(
 
     @app.post("/api/corrections")
     async def create_correction(request: ManualCorrectionRequest):
+        current_runtime = get_runtime()
         try:
-            review = get_runtime().apply_manual_correction(request)
+            review = current_runtime.apply_manual_correction(request)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         broadcaster.publish_review(review)
+        broadcaster.publish_state(current_runtime.state())
         return review
 
     return app

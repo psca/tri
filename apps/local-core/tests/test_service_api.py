@@ -330,7 +330,7 @@ def test_review_state_endpoint_returns_timelines(tmp_path) -> None:
     assert body["athletes"][0]["timeline"]
 
 
-def test_post_correction_adds_manual_pass_and_publishes_review_state(
+def test_post_correction_adds_manual_pass_and_publishes_review_and_race_state(
     tmp_path, monkeypatch
 ) -> None:
     class FakeBroadcaster:
@@ -352,7 +352,6 @@ def test_post_correction_adds_manual_pass_and_publishes_review_state(
 
     with TestClient(app) as client:
         client.post("/api/race/start")
-        state_broadcasts_before_correction = len(fake.published_states)
         response = client.post(
             "/api/corrections",
             json={
@@ -369,7 +368,48 @@ def test_post_correction_adds_manual_pass_and_publishes_review_state(
     assert response.status_code == 200
     assert review["athletes"][0]["timeline"][0]["status"] == "manual"
     assert fake.published_reviews
-    assert len(fake.published_states) == state_broadcasts_before_correction
+    assert fake.published_states[-1].athletes[0].next_event_id == "run1_lap2_complete"
+
+
+def test_restart_hydrates_manual_add_pass_progression(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        manual = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "route_event_id": "run1_lap1_complete",
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Saw athlete cross while BLE missed",
+                "created_by": "operator",
+            },
+        )
+
+    assert manual.status_code == 200
+
+    with TestClient(app) as client:
+        restarted_state = client.get("/api/race/state").json()
+        detected = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+            },
+        )
+
+    assert restarted_state["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+    assert detected.status_code == 200
+    assert [event["route_event_id"] for event in detected.json()["accepted_events"]] == [
+        "run1_lap2_complete"
+    ]
+    assert detected.json()["athletes"][0]["next_event_id"] == "run1_lap3_complete"
 
 
 def test_post_correction_rejects_unknown_athlete(tmp_path) -> None:

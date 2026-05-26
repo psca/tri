@@ -66,6 +66,20 @@ class EventStore:
               confidence TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS manual_corrections (
+              local_sequence_number INTEGER PRIMARY KEY,
+              race_id TEXT NOT NULL,
+              correction_type TEXT NOT NULL,
+              athlete_id TEXT NOT NULL,
+              route_event_id TEXT,
+              target_local_sequence_number INTEGER,
+              corrected_time_wall TEXT,
+              status TEXT,
+              reason TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              created_by TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS sync_outbox (
               local_sequence_number INTEGER PRIMARY KEY,
               idempotency_key TEXT NOT NULL UNIQUE,
@@ -204,6 +218,74 @@ class EventStore:
             )
             return sequence
 
+    def append_manual_correction(
+        self,
+        *,
+        race_id: str,
+        correction_type: str,
+        athlete_id: str,
+        route_event_id: str | None,
+        target_local_sequence_number: int | None,
+        corrected_time_wall: str | None,
+        status: str | None,
+        reason: str,
+        created_at: str,
+        created_by: str,
+    ) -> int:
+        with self.conn:
+            sequence = self._next_sequence()
+            self.conn.execute(
+                """
+                INSERT INTO manual_corrections (
+                  local_sequence_number, race_id, correction_type, athlete_id,
+                  route_event_id, target_local_sequence_number, corrected_time_wall,
+                  status, reason, created_at, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sequence,
+                    race_id,
+                    correction_type,
+                    athlete_id,
+                    route_event_id,
+                    target_local_sequence_number,
+                    corrected_time_wall,
+                    status,
+                    reason,
+                    created_at,
+                    created_by,
+                ),
+            )
+            payload = {
+                "type": "manual_correction",
+                "local_sequence_number": sequence,
+                "race_id": race_id,
+                "correction_type": correction_type,
+                "athlete_id": athlete_id,
+                "route_event_id": route_event_id,
+                "target_local_sequence_number": target_local_sequence_number,
+                "corrected_time_wall": corrected_time_wall,
+                "status": status,
+                "reason": reason,
+                "created_at": created_at,
+                "created_by": created_by,
+            }
+            payload_json = json.dumps(payload, sort_keys=True)
+            self.conn.execute(
+                """
+                INSERT INTO sync_outbox (
+                  local_sequence_number, idempotency_key, payload_hash, payload_json, status
+                ) VALUES (?, ?, ?, ?, 'pending')
+                """,
+                (
+                    sequence,
+                    f"{race_id}:{sequence}",
+                    hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+                    payload_json,
+                ),
+            )
+            return sequence
+
     def raw_detections(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is not None:
             rows = self.conn.execute(
@@ -224,6 +306,12 @@ class EventStore:
     def accepted_route_events(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM accepted_route_events ORDER BY local_sequence_number"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def manual_corrections(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT * FROM manual_corrections ORDER BY local_sequence_number"
         ).fetchall()
         return [dict(row) for row in rows]
 

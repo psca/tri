@@ -59,6 +59,71 @@ def test_append_accepted_event_also_enqueues_sync(tmp_path):
     assert outbox[0]["idempotency_key"] == "duathlon-demo:1"
 
 
+def test_append_manual_correction_persists_fact_and_sync_payload(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+
+    sequence = store.append_manual_correction(
+        race_id="duathlon-demo",
+        correction_type="manual_add_pass",
+        athlete_id="A001",
+        route_event_id="run1_lap1_complete",
+        target_local_sequence_number=None,
+        corrected_time_wall="2026-05-25T09:10:00+08:00",
+        status=None,
+        reason="Saw athlete cross while BLE missed",
+        created_at="2026-05-25T09:11:00+08:00",
+        created_by="operator",
+    )
+
+    corrections = store.manual_corrections()
+    assert corrections[0]["local_sequence_number"] == sequence
+    assert corrections[0]["correction_type"] == "manual_add_pass"
+    assert corrections[0]["reason"] == "Saw athlete cross while BLE missed"
+
+    outbox = store.sync_outbox()
+    expected_hash = hashlib.sha256(
+        outbox[0]["payload_json"].encode("utf-8")
+    ).hexdigest()
+    assert outbox[0]["local_sequence_number"] == sequence
+    assert outbox[0]["idempotency_key"] == f"duathlon-demo:{sequence}"
+    assert outbox[0]["payload_hash"] == expected_hash
+    assert outbox[0]["status"] == "pending"
+    assert '"type": "manual_correction"' in outbox[0]["payload_json"]
+
+
+def test_manual_corrections_are_ordered_by_sequence(tmp_path) -> None:
+    store = EventStore(tmp_path / "race.sqlite")
+    first = store.append_manual_correction(
+        race_id="duathlon-demo",
+        correction_type="mark_status",
+        athlete_id="A001",
+        route_event_id=None,
+        target_local_sequence_number=None,
+        corrected_time_wall=None,
+        status="dnf",
+        reason="Stopped after bike",
+        created_at="2026-05-25T10:00:00+08:00",
+        created_by="operator",
+    )
+    second = store.append_manual_correction(
+        race_id="duathlon-demo",
+        correction_type="mark_status",
+        athlete_id="A002",
+        route_event_id=None,
+        target_local_sequence_number=None,
+        corrected_time_wall=None,
+        status="dq",
+        reason="Wrong course",
+        created_at="2026-05-25T10:01:00+08:00",
+        created_by="operator",
+    )
+
+    assert [row["local_sequence_number"] for row in store.manual_corrections()] == [
+        first,
+        second,
+    ]
+
+
 def test_two_connections_share_canonical_sequence(tmp_path):
     first_store = EventStore(tmp_path / "race.db")
     second_store = EventStore(tmp_path / "race.db")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 
+from tri_timing.ble_receiver import run_ble_receiver
 from tri_timing.config import load_athletes, load_race_config
 from tri_timing.detector import PassDetector
 from tri_timing.engine import RaceEngine
@@ -20,9 +22,30 @@ def main() -> None:
     replay.add_argument("--athletes", required=True)
     replay.add_argument("--output", required=True)
 
+    receiver_run = subparsers.add_parser("receiver-run")
+    receiver_run.add_argument("--race", required=True)
+    receiver_run.add_argument("--athletes", required=True)
+    receiver_run.add_argument("--receiver-id", required=True)
+    receiver_run.add_argument("--service-url", default="http://127.0.0.1:8000")
+    receiver_run.add_argument("--jsonl-log", required=True)
+    receiver_run.add_argument("--batch-size", type=int, default=10)
+    receiver_run.add_argument("--flush-interval-sec", type=float, default=2.0)
+
     args = parser.parse_args()
     if args.command == "synthetic-replay":
         synthetic_replay(Path(args.race), Path(args.athletes), Path(args.output))
+    elif args.command == "receiver-run":
+        asyncio.run(
+            run_ble_receiver(
+                race_path=Path(args.race),
+                athletes_path=Path(args.athletes),
+                receiver_id=args.receiver_id,
+                service_url=args.service_url,
+                jsonl_log=Path(args.jsonl_log),
+                batch_size=args.batch_size,
+                flush_interval_sec=args.flush_interval_sec,
+            )
+        )
 
 
 def synthetic_replay(race_path: Path, athletes_path: Path, output_path: Path) -> None:

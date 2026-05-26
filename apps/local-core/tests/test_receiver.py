@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -177,3 +178,17 @@ def test_receiver_uploader_raises_http_status_error_on_server_error() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         uploader.upload("laptop-dongle-1", [observation])
+
+
+def test_receiver_command_is_registered() -> None:
+    result = subprocess.run(
+        ["uv", "run", "tri-timing", "receiver-run", "--help"],
+        cwd=Path(__file__).parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "--receiver-id" in result.stdout
+    assert "--service-url" in result.stdout
+    assert "--jsonl-log" in result.stdout

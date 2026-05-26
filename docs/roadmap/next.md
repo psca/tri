@@ -12,6 +12,9 @@ The software can run a local race authority, simulate detections, advance ordere
 
 **Purpose:** connect actual beacon hardware to the local timing authority.
 
+Spec: [Real BLE Receiver And Detection Ingest Design](../specs/2026-05-26-real-ble-receiver-ingest-design.md)  
+Plan: [Real BLE Receiver And Detection Ingest Implementation Plan](../plans/2026-05-26-real-ble-receiver-ingest.md)
+
 Bundle these together because they form one end-to-end hardware path:
 
 - Python `bleak` scanner loop.

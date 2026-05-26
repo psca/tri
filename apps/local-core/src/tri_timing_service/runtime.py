@@ -6,11 +6,13 @@ from tri_timing.config import load_athletes, load_race_config
 from tri_timing.detector import PassDetector
 from tri_timing.engine import RaceEngine
 from tri_timing.models import RouteEventKind
+from tri_timing.review import ReviewState, build_review_state
 from tri_timing.route import compile_route
 from tri_timing.store import EventStore
 from tri_timing_service.models import (
     AcceptedEventView,
     AthleteView,
+    ManualCorrectionRequest,
     RaceStateView,
     RawDetectionView,
     SyntheticDetectionRequest,
@@ -95,6 +97,73 @@ class RaceRuntime:
             raw_detections=raw_detections,
             warnings=[],
         )
+
+    def review_state(self) -> ReviewState:
+        return build_review_state(
+            race_id=self._race_config.race_id,
+            phase=self._phase,
+            athletes=[
+                {
+                    "athlete_id": athlete.athlete_id,
+                    "name": athlete.name,
+                    "bib": athlete.bib,
+                }
+                for athlete in self._athletes
+            ],
+            route_events=self._route,
+            accepted_events=self._store.accepted_route_events(),
+            manual_corrections=self._store.manual_corrections(),
+            raw_detections=self._store.raw_detections(limit=25),
+        )
+
+    def corrections(self) -> list[dict]:
+        return self._store.manual_corrections()
+
+    def apply_manual_correction(
+        self, request: ManualCorrectionRequest
+    ) -> ReviewState:
+        athlete_ids = {athlete.athlete_id for athlete in self._athletes}
+        if request.athlete_id not in athlete_ids:
+            raise ValueError(f"unknown athlete: {request.athlete_id}")
+
+        route_event_ids = {event.id for event in self._route}
+        if (
+            request.route_event_id is not None
+            and request.route_event_id not in route_event_ids
+        ):
+            raise ValueError(f"unknown route event: {request.route_event_id}")
+
+        if not request.reason.strip():
+            raise ValueError("reason is required")
+
+        if request.correction_type in {"manual_reject_pass", "manual_override_time"}:
+            target_sequences = {
+                row["local_sequence_number"]
+                for row in self._store.accepted_route_events()
+                if row["athlete_id"] == request.athlete_id
+            }
+            target_sequences.update(
+                row["local_sequence_number"]
+                for row in self._store.manual_corrections()
+                if row["athlete_id"] == request.athlete_id
+                and row["correction_type"] == "manual_add_pass"
+            )
+            if request.target_local_sequence_number not in target_sequences:
+                raise ValueError("target event does not exist")
+
+        self._store.append_manual_correction(
+            race_id=self._race_config.race_id,
+            correction_type=request.correction_type,
+            athlete_id=request.athlete_id,
+            route_event_id=request.route_event_id,
+            target_local_sequence_number=request.target_local_sequence_number,
+            corrected_time_wall=request.corrected_time_wall,
+            status=request.status,
+            reason=request.reason,
+            created_at=datetime.now(tz=UTC).isoformat(),
+            created_by=request.created_by,
+        )
+        return self.review_state()
 
     def start(self) -> RaceStateView:
         if self._phase == "pre_start":

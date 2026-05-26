@@ -316,3 +316,148 @@ def test_sse_stream_publishes_state_to_subscribers(tmp_path) -> None:
 
     payload = json.loads(state_line.removeprefix("data: "))
     assert payload["phase"] == "live"
+
+
+def test_review_state_endpoint_returns_timelines(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.get("/api/review/state")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["race_id"] == "duathlon-demo"
+    assert body["athletes"][0]["timeline"]
+
+
+def test_post_correction_adds_manual_pass_and_publishes_state(
+    tmp_path, monkeypatch
+) -> None:
+    class FakeBroadcaster:
+        published: list[RaceStateView] = []
+
+        def stream(self, initial_state: RaceStateView):
+            return iter(())
+
+        def publish_state(self, state: RaceStateView) -> None:
+            self.published.append(state)
+
+    fake = FakeBroadcaster()
+    monkeypatch.setattr("tri_timing_service.app.EventBroadcaster", lambda: fake)
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "route_event_id": "run1_lap1_complete",
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Saw athlete cross while BLE missed",
+                "created_by": "operator",
+            },
+        )
+        review = client.get("/api/review/state").json()
+
+    assert response.status_code == 200
+    assert review["athletes"][0]["timeline"][0]["status"] == "manual"
+    assert fake.published
+
+
+def test_post_correction_rejects_unknown_athlete(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "mark_status",
+                "athlete_id": "UNKNOWN",
+                "status": "dnf",
+                "reason": "No such athlete",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+
+
+def test_corrections_endpoint_returns_correction_log(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "mark_status",
+                "athlete_id": "A001",
+                "status": "dnf",
+                "reason": "Stopped after bike",
+                "created_by": "operator",
+            },
+        )
+        response = client.get("/api/corrections")
+
+    assert response.status_code == 200
+    corrections = response.json()["corrections"]
+    assert corrections[0]["correction_type"] == "mark_status"
+    assert corrections[0]["reason"] == "Stopped after bike"
+
+
+def test_post_correction_rejects_unknown_route_event(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "route_event_id": "unknown_event",
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Saw athlete cross while BLE missed",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unknown route event: unknown_event"
+
+
+def test_post_correction_rejects_blank_reason(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "mark_status",
+                "athlete_id": "A001",
+                "status": "dnf",
+                "reason": "   ",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "reason is required"
+
+
+def test_post_correction_rejects_missing_target_event(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_reject_pass",
+                "athlete_id": "A001",
+                "target_local_sequence_number": 999,
+                "reason": "False positive",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "target event does not exist"

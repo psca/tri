@@ -44,3 +44,14 @@ class SyntheticDetectionRequest(BaseModel):
     rssi: int = -55
     repeat_count: int = 6
     timestamp_sec: float | None = None
+
+
+class ManualCorrectionRequest(BaseModel):
+    correction_type: str
+    athlete_id: str
+    route_event_id: str | None = None
+    target_local_sequence_number: int | None = None
+    corrected_time_wall: str | None = None
+    status: str | None = None
+    reason: str
+    created_by: str = "operator"

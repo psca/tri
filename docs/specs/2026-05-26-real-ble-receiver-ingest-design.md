@@ -5,7 +5,7 @@ Status: Draft for implementation planning
 
 ## Summary
 
-Build the missing hardware bridge between configurable BLE/iBeacon wristbands and the local timing authority. The receiver process runs on the race laptop, scans BLE advertisements with `bleak`, filters known athlete beacons, writes a local JSONL fallback log, and posts normalized detections to the local FastAPI service. The service accepts real detections, stores them as raw evidence, feeds the existing RSSI pass detector, advances the race engine, and exposes minimal receiver health to the admin UI.
+Build the missing hardware bridge between configurable BLE/iBeacon wristbands and the local timing authority. The receiver process runs on the race laptop, scans BLE advertisements with `bleak`, normalizes iBeacon observations, writes a local JSONL fallback log, and posts detections to the local FastAPI service. The service accepts real detections, stores known athlete detections as raw evidence, counts unknown iBeacons for receiver health, feeds the existing RSSI pass detector, advances the race engine, and exposes minimal receiver health to the admin UI.
 
 This phase is deliberately narrow. It should prove that one laptop, one BLE dongle, and real beacon tags can produce useful timing facts. It should not solve multi-receiver timing, advanced calibration, cloud spectator polish, or transition automation beyond the existing detection policies.
 
@@ -13,8 +13,8 @@ This phase is deliberately narrow. It should prove that one laptop, one BLE dong
 
 - Add a real Python BLE scanner path using `bleak`.
 - Parse iBeacon advertisements into UUID, major, minor, RSSI, and timestamps.
-- Filter observations against configured athletes.
-- Persist every known-beacon observation to local receiver JSONL before upload.
+- Identify observations against configured athletes when possible.
+- Persist every parsed race iBeacon observation to local receiver JSONL before upload.
 - Add local service detection ingest: `POST /api/detections`.
 - Store ingested detections in SQLite and run them through existing route/detector logic.
 - Track minimal receiver health for admin visibility.
@@ -47,7 +47,7 @@ BLE iBeacon wristband
   -> admin SSE/state/receiver health
 ```
 
-The receiver remains dumb. It does not decide whether a pass is valid and does not advance athlete state. It only parses, filters, logs, and uploads observations.
+The receiver remains dumb. It does not decide whether a pass is valid and does not advance athlete state. It only parses, normalizes, logs, and uploads observations.
 
 The local service remains the timing authority. It validates receiver/checkpoint/beacon identity, stores raw evidence, applies detection policies, advances route state only when rules allow it, and publishes admin updates.
 
@@ -102,8 +102,8 @@ The process:
 - validates the receiver ID exists and derives its checkpoint ID;
 - starts `bleak.BleakScanner`;
 - parses iBeacon manufacturer data;
-- ignores unknown beacons but counts them for health/debug logs;
-- writes known-beacon observations to JSONL before upload;
+- uploads known and unknown parsed iBeacon observations so the service can count unknown beacons for health/debugging;
+- writes parsed iBeacon observations to JSONL before upload;
 - posts batches to `/api/detections`;
 - retries failed uploads without deleting the local log;
 - prints concise operational status.

@@ -28,6 +28,7 @@ ALLOWED_CORRECTION_TYPES = {
     "mark_status",
 }
 ALLOWED_MANUAL_STATUSES = {"dnf", "dq", "manual_finished", "racing"}
+COMPLETED_TIMELINE_STATUSES = {"accepted", "manual", "overridden"}
 
 
 class RaceRuntime:
@@ -189,7 +190,12 @@ class RaceRuntime:
             created_at=datetime.now(tz=UTC).isoformat(),
             created_by=request.created_by,
         )
-        return self.review_state()
+        review = self.review_state()
+        self._sync_engine_state_from_review(
+            athlete_id=request.athlete_id,
+            review=review,
+        )
+        return review
 
     def _targetable_timeline_sequences(self, athlete_id: str) -> set[int]:
         target_sequences: set[int] = set()
@@ -197,13 +203,62 @@ class RaceRuntime:
             if athlete.athlete_id != athlete_id:
                 continue
             for event in athlete.timeline:
-                if event.status not in {"accepted", "manual", "overridden"}:
+                if event.status not in COMPLETED_TIMELINE_STATUSES | {"rejected"}:
                     continue
                 if event.accepted_local_sequence_number is not None:
                     target_sequences.add(event.accepted_local_sequence_number)
                 target_sequences.update(event.correction_sequence_numbers)
             break
         return target_sequences
+
+    def _sync_engine_state_from_review(
+        self,
+        *,
+        athlete_id: str,
+        review: ReviewState,
+    ) -> None:
+        try:
+            state = self._engine.state_for(athlete_id)
+        except KeyError:
+            return
+
+        review_athlete = next(
+            (
+                athlete
+                for athlete in review.athletes
+                if athlete.athlete_id == athlete_id
+            ),
+            None,
+        )
+        if review_athlete is None:
+            return
+
+        completed_prefix = 0
+        for route_event, timeline_event in zip(
+            self._route,
+            review_athlete.timeline,
+            strict=False,
+        ):
+            if route_event.id != timeline_event.route_event_id:
+                break
+            if timeline_event.status not in COMPLETED_TIMELINE_STATUSES:
+                break
+            completed_prefix += 1
+
+        state.next_route_event_index = completed_prefix
+        if (
+            completed_prefix > 0
+            and completed_prefix <= len(self._route)
+            and (
+                self._route[completed_prefix - 1].kind == RouteEventKind.FINISH
+                or self._route[completed_prefix - 1].kind == "finish"
+            )
+        ):
+            state.status = "finished"
+        elif review_athlete.status in ALLOWED_MANUAL_STATUSES:
+            state.status = review_athlete.status
+        else:
+            state.status = "racing"
 
     def start(self) -> RaceStateView:
         if self._phase == "pre_start":

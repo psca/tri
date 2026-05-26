@@ -643,6 +643,93 @@ def test_post_correction_accepts_overridden_event_as_target(tmp_path) -> None:
     assert reject_override.status_code == 200
 
 
+def test_post_correction_accepts_rejected_event_as_target(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+            },
+        )
+        review = client.get("/api/review/state").json()
+        target_sequence = review["athletes"][0]["timeline"][0][
+            "accepted_local_sequence_number"
+        ]
+
+        reject = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_reject_pass",
+                "athlete_id": "A001",
+                "target_local_sequence_number": target_sequence,
+                "reason": "Rejected wrong pass by mistake",
+                "created_by": "operator",
+            },
+        )
+        override_rejected = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_override_time",
+                "athlete_id": "A001",
+                "target_local_sequence_number": target_sequence,
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Restore with camera time",
+                "created_by": "operator",
+            },
+        )
+
+    assert reject.status_code == 200
+    assert override_rejected.status_code == 200
+    assert (
+        override_rejected.json()["athletes"][0]["timeline"][0]["status"]
+        == "overridden"
+    )
+
+
+def test_manual_add_pass_syncs_live_engine_next_event(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        manual = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "route_event_id": "run1_lap1_complete",
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Saw athlete cross while BLE missed",
+                "created_by": "operator",
+            },
+        )
+        state_after_manual = client.get("/api/race/state").json()
+        detected = client.post(
+            "/api/synthetic/detection",
+            json={
+                "athlete_id": "A001",
+                "checkpoint_id": "gate",
+                "receiver_id": "synthetic",
+                "rssi": -55,
+                "repeat_count": 6,
+            },
+        )
+
+    assert manual.status_code == 200
+    assert state_after_manual["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+    assert detected.status_code == 200
+    assert [event["route_event_id"] for event in detected.json()["accepted_events"]] == [
+        "run1_lap2_complete"
+    ]
+    assert detected.json()["athletes"][0]["next_event_id"] == "run1_lap3_complete"
+
+
 def test_post_correction_rejects_target_from_invalid_raw_manual_add(tmp_path) -> None:
     database_path = tmp_path / "race.sqlite"
     with EventStore(database_path) as store:

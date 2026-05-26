@@ -5,7 +5,7 @@ from pathlib import Path
 from tri_timing.config import load_athletes, load_race_config
 from tri_timing.detector import PassDetector
 from tri_timing.engine import RaceEngine
-from tri_timing.models import RouteEventKind
+from tri_timing.models import AthleteConfig, RouteEventKind
 from tri_timing.review import ReviewState, build_review_state
 from tri_timing.route import compile_route
 from tri_timing.store import EventStore
@@ -34,6 +34,8 @@ ALLOWED_CORRECTION_TYPES = {
 }
 ALLOWED_MANUAL_STATUSES = {"dnf", "dq", "manual_finished", "racing"}
 COMPLETED_TIMELINE_STATUSES = {"accepted", "manual", "overridden"}
+RECEIVER_ONLINE_TIMEOUT_SEC = 30
+LIVE_DETECTOR_REPLAY_LIMIT = 1000
 
 
 class RaceRuntime:
@@ -43,25 +45,20 @@ class RaceRuntime:
         self._athletes = load_athletes(settings.athletes_path)
         self._route = compile_route(self._race_config)
         self._store = EventStore(database_path)
-        self._athletes_by_beacon = {
-            (
-                athlete.beacon_uuid.lower(),
-                athlete.beacon_major,
-                athlete.beacon_minor,
-            ): athlete
-            for athlete in self._athletes
-        }
+        self._athletes_by_beacon = self._build_athletes_by_beacon()
         self._checkpoint_by_receiver = {
             receiver.id: receiver.checkpoint_id
             for receiver in self._race_config.receivers
         }
         self._live_detectors: dict[tuple[str, str], PassDetector] = {}
+        self._live_detector_wall_times: dict[tuple[str, str], dict[float, str]] = {}
         self._receiver_health: dict[str, dict] = {
             receiver.id: {
                 "receiver_id": receiver.id,
                 "checkpoint_id": receiver.checkpoint_id,
                 "last_packet_wall": None,
                 "last_packet_monotonic": None,
+                "last_seen_service_monotonic": None,
                 "known_packets": 0,
                 "unknown_packets": 0,
                 "latest_known_beacons": {},
@@ -77,7 +74,26 @@ class RaceRuntime:
         self._hydrate_engine_from_store()
         self._phase = self._store.metadata("phase") or "pre_start"
         self._restore_engine_phase()
+        self._hydrate_live_detectors_from_raw_detections()
         self._sync_engine_state_from_review_for_all_athletes(self.review_state())
+
+    def _build_athletes_by_beacon(self) -> dict[tuple[str, int, int], AthleteConfig]:
+        athletes_by_beacon = {}
+        for athlete in self._athletes:
+            beacon_key = (
+                athlete.beacon_uuid.lower(),
+                athlete.beacon_major,
+                athlete.beacon_minor,
+            )
+            existing = athletes_by_beacon.get(beacon_key)
+            if existing is not None:
+                raise ValueError(
+                    "duplicate beacon assignment: "
+                    f"{beacon_key[0]}/{beacon_key[1]}/{beacon_key[2]} "
+                    f"is assigned to {existing.athlete_id} and {athlete.athlete_id}"
+                )
+            athletes_by_beacon[beacon_key] = athlete
+        return athletes_by_beacon
 
     @classmethod
     def create(
@@ -426,6 +442,7 @@ class RaceRuntime:
             health = self._receiver_health[request.receiver_id]
             health["last_packet_wall"] = detection.timestamp_wall
             health["last_packet_monotonic"] = detection.timestamp_monotonic
+            health["last_seen_service_monotonic"] = time.monotonic()
 
             athlete = self._athletes_by_beacon.get(
                 (
@@ -510,6 +527,8 @@ class RaceRuntime:
             self._live_detectors[detector_key] = detector
 
         engine_timestamp = self._engine_timestamp(timestamp_monotonic)
+        wall_times = self._live_detector_wall_times.setdefault(detector_key, {})
+        wall_times[engine_timestamp] = timestamp_wall
         candidate = detector.observe(
             timestamp_sec=engine_timestamp,
             rssi=rssi,
@@ -527,9 +546,10 @@ class RaceRuntime:
             route_event_id=decision.route_event_id,
             checkpoint_id=checkpoint_id,
             pass_candidate_id=candidate.candidate_id,
-            event_time_wall=timestamp_wall,
+            event_time_wall=wall_times.get(candidate.peak_time_sec, timestamp_wall),
             confidence=candidate.confidence,
         )
+        self._live_detector_wall_times.pop(detector_key, None)
         return DetectionAcceptedEventView(
             athlete_id=athlete_id,
             route_event_id=decision.route_event_id,
@@ -543,11 +563,25 @@ class RaceRuntime:
             return receiver_timestamp
         return race_start_sec + receiver_timestamp
 
-    def receiver_health(self) -> ReceiverHealthResponse:
+    def receiver_health(
+        self, now_monotonic: float | None = None
+    ) -> ReceiverHealthResponse:
         receivers = []
+        current_monotonic = (
+            now_monotonic if now_monotonic is not None else time.monotonic()
+        )
         for row in self._receiver_health.values():
             status = "silent"
-            if row["last_packet_monotonic"] is not None:
+            last_seen_monotonic = (
+                row["last_packet_monotonic"]
+                if now_monotonic is not None
+                else row["last_seen_service_monotonic"]
+            )
+            if (
+                last_seen_monotonic is not None
+                and current_monotonic - last_seen_monotonic
+                <= RECEIVER_ONLINE_TIMEOUT_SEC
+            ):
                 status = "online"
             receivers.append(
                 ReceiverHealthView(
@@ -629,6 +663,29 @@ class RaceRuntime:
             self._engine.start(
                 race_start_sec=race_start_sec,
                 start_grace_sec=self._race_config.start.start_grace_sec,
+            )
+
+    def _hydrate_live_detectors_from_raw_detections(self) -> None:
+        if self._phase != "live":
+            return
+
+        for row in self._store.raw_detections(limit=LIVE_DETECTOR_REPLAY_LIMIT):
+            athlete = self._athletes_by_beacon.get(
+                (
+                    row["beacon_uuid"].lower(),
+                    row["beacon_major"],
+                    row["beacon_minor"],
+                )
+            )
+            if athlete is None:
+                continue
+
+            self._maybe_accept_detection(
+                athlete_id=athlete.athlete_id,
+                checkpoint_id=row["checkpoint_id"],
+                rssi=row["rssi"],
+                timestamp_wall=row["timestamp_wall"],
+                timestamp_monotonic=row["timestamp_monotonic"],
             )
 
     def _peak_time_sec_from_candidate_id(self, candidate_id: str | None) -> float | None:

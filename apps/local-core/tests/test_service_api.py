@@ -9,6 +9,7 @@ from tri_timing.store import EventStore
 from tri_timing_service.app import create_app
 from tri_timing_service.broadcaster import EventBroadcaster
 from tri_timing_service.models import RaceStateView
+from tri_timing_service.runtime import RaceRuntime
 from tri_timing_service.settings import ServiceSettings
 
 
@@ -823,6 +824,29 @@ def _detection_payload(
     }
 
 
+def test_runtime_rejects_duplicate_beacon_assignments(tmp_path) -> None:
+    athletes_path = tmp_path / "athletes.csv"
+    athletes_path.write_text(
+        "\n".join(
+            [
+                "athlete_id,bib,name,beacon_uuid,beacon_major,beacon_minor",
+                "A001,1,Alice,11111111-1111-1111-1111-111111111111,1,1",
+                "A999,999,Imposter,11111111-1111-1111-1111-111111111111,1,1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    settings = ServiceSettings(
+        race_config_path=Path("tests/fixtures/race.yaml"),
+        athletes_path=athletes_path,
+        database_path=tmp_path / "race.sqlite",
+    )
+
+    with pytest.raises(ValueError, match="duplicate beacon assignment"):
+        RaceRuntime(settings, tmp_path / "race.sqlite")
+
+
 def test_detection_ingest_stores_known_raw_detection(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
@@ -853,6 +877,60 @@ def test_detection_ingest_advances_live_race_after_candidate_closes(tmp_path) ->
         "run1_lap1_complete"
     )
     assert state["athletes"][0]["next_event_id"] == "run1_lap2_complete"
+
+
+def test_detection_ingest_accepted_event_uses_peak_packet_wall_time(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+    samples = [
+        (500, -60, "2026-05-26T09:00:00+08:00"),
+        (501, -50, "2026-05-26T09:00:01+08:00"),
+        (502, -55, "2026-05-26T09:00:02+08:00"),
+        (506, -83, "2026-05-26T09:00:06+08:00"),
+    ]
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        for timestamp_sec, rssi, timestamp_wall in samples:
+            payload = _detection_payload(rssi=rssi, timestamp_sec=timestamp_sec)
+            payload["detections"][0]["timestamp_wall"] = timestamp_wall
+            response = client.post("/api/detections", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["accepted_events"][0]["route_event_id"] == (
+        "run1_lap1_complete"
+    )
+    with EventStore(database_path) as store:
+        accepted = store.accepted_route_events()
+
+    assert accepted[0]["event_time_wall"] == "2026-05-26T09:00:01+08:00"
+
+
+def test_detection_ingest_restart_hydrates_partial_detector_state(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        for offset, rssi in [(500, -55), (501, -54), (502, -53)]:
+            response = client.post(
+                "/api/detections",
+                json=_detection_payload(rssi=rssi, timestamp_sec=offset),
+            )
+
+    assert response.status_code == 200
+    assert response.json()["accepted_events"] == []
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/detections",
+            json=_detection_payload(rssi=-83, timestamp_sec=506),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["accepted_events"][0]["route_event_id"] == (
+        "run1_lap1_complete"
+    )
 
 
 def test_detection_ingest_rejects_unknown_receiver(tmp_path) -> None:
@@ -896,3 +974,13 @@ def test_receiver_health_reports_online_receiver(tmp_path) -> None:
     assert receiver["status"] == "online"
     assert receiver["known_packets"] == 1
     assert receiver["latest_known_beacons"][0]["athlete_id"] == "A001"
+
+
+def test_receiver_health_reports_stale_receiver_without_sleeping(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/detections", json=_detection_payload(timestamp_sec=100))
+        health = app.state.runtime.receiver_health(now_monotonic=200)
+
+    assert health.receivers[0].status == "silent"

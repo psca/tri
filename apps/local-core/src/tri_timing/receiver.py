@@ -30,14 +30,22 @@ class ReceiverObservation:
 
 
 def build_beacon_lookup(athletes: list[AthleteConfig]) -> dict[BeaconKey, AthleteConfig]:
-    return {
-        (
+    lookup: dict[BeaconKey, AthleteConfig] = {}
+    for athlete in athletes:
+        key = (
             athlete.beacon_uuid.lower(),
             athlete.beacon_major,
             athlete.beacon_minor,
-        ): athlete
-        for athlete in athletes
-    }
+        )
+        existing = lookup.get(key)
+        if existing is not None:
+            beacon = f"{key[0]}/{key[1]}/{key[2]}"
+            raise ValueError(
+                "duplicate beacon assignment "
+                f"{beacon}: {existing.athlete_id} and {athlete.athlete_id}"
+            )
+        lookup[key] = athlete
+    return lookup
 
 
 def checkpoint_for_receiver(race: RaceConfig, receiver_id: str) -> str:

@@ -6,6 +6,7 @@ This repository is a monorepo for a BLE-assisted triathlon/duathlon timing syste
 
 - `apps/local-core/` contains the Python timing authority, CLI, tests, fixtures, `pyproject.toml`, and `uv.lock`.
 - `apps/local-core/src/tri_timing/` contains the Python package.
+- `apps/local-core/src/tri_timing_service/` contains the local FastAPI timing authority runtime.
 - `apps/local-core/tests/` contains pytest coverage and fixtures.
 - `apps/admin/` contains the local React/Vite admin shell.
 - `apps/cloud-spectator/` contains the Cloudflare Worker, D1 migrations, and spectator API tests.
@@ -25,6 +26,7 @@ cd apps/local-core
 uv sync --dev
 uv run pytest -v
 uv run tri-timing synthetic-replay --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --output /tmp/tri-timing-result.json
+uv run tri-timing receiver-run --race tests/fixtures/race.yaml --athletes tests/fixtures/athletes.csv --receiver-id laptop-dongle-1 --service-url http://127.0.0.1:8000 --jsonl-log /tmp/tri-receiver.jsonl
 uv run uvicorn tri_timing_service.app:create_app --factory --reload
 ```
 
@@ -69,7 +71,7 @@ Avoid putting race-state or timing logic in React. UI should display projections
 
 ## Testing Guidelines
 
-Use `pytest` via `uv run pytest` for Python. Tests should cover replay determinism, start-grace suppression, RSSI pass detection, ordered route advancement, manual correction behavior, and SQLite append-only storage.
+Use `pytest` via `uv run pytest` for Python. Tests should cover replay determinism, start-grace suppression, RSSI pass detection, receiver ingest/health behavior, ordered route advancement, manual correction behavior, and SQLite append-only storage.
 
 Prefer fixture-driven tests using `apps/local-core/tests/fixtures/`. Name tests by behavior, e.g. `test_start_grace_blocks_route_advancement`.
 
@@ -87,4 +89,4 @@ Pull requests should include a summary, test evidence, affected docs/specs, and 
 
 ## Architecture Notes
 
-The local Python service is the official timing authority. `tri_timing` is library code, and `tri_timing_service` is the local FastAPI runtime adapter. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP, and D1 is a derived read model. Cloud sync must be idempotent and must not block local timing when the network or ingest endpoint is unavailable. BLE detections are evidence; accepted route events and manual corrections are append-only facts. Manual corrections must not edit or delete accepted events; derive corrected state through review projection.
+The Python receiver is a dumb BLE collector: parse iBeacon packets, write JSONL, and upload detections. The local Python service is the official timing authority. `tri_timing` is library code, and `tri_timing_service` is the local FastAPI runtime adapter. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP, and D1 is a derived read model. Cloud sync must be idempotent and must not block local timing when the network or ingest endpoint is unavailable. BLE detections are evidence; accepted route events and manual corrections are append-only facts. Manual corrections must not edit or delete accepted events; derive corrected state through review projection.

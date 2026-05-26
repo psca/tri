@@ -20,8 +20,12 @@ Implemented so far:
 - RSSI pass detector with cooldown/stale-window handling.
 - Race engine for start grace, expected route advancement, duplicate suppression, and finish state.
 - Scanner adapter boundary and synthetic replay CLI.
+- Real iBeacon parser and Python `bleak` receiver CLI.
+- Receiver JSONL fallback logging, upload retry, and startup validation.
+- Local detection ingest API and receiver health status.
 - Local FastAPI service runtime adapter.
 - Local React/Vite admin shell.
+- Admin receiver health panel with polling.
 - Retrying cloud sync publisher for accepted timing facts.
 - Cloudflare Worker spectator API with authenticated ingest, D1 migrations, and public read endpoints.
 - Manual review/correction design and implementation.
@@ -32,6 +36,8 @@ Implemented so far:
 - [HTML slide deck](docs/specs/2026-05-25-ble-triathlon-timing-mvp-slides.html)
 - [Local-core implementation plan](docs/plans/2026-05-25-ble-timing-local-core.md)
 - [Cloud spectator sync implementation plan](docs/plans/2026-05-25-cloud-spectator-sync.md)
+- [Real BLE receiver design](docs/specs/2026-05-26-real-ble-receiver-ingest-design.md)
+- [Real BLE receiver implementation plan](docs/plans/2026-05-26-real-ble-receiver-ingest.md)
 - [Local-core acceptance checklist](docs/acceptance/local-core.md)
 - [Cloud spectator acceptance checklist](docs/acceptance/cloud-spectator.md)
 - [Manual review/corrections acceptance checklist](docs/acceptance/manual-review-corrections.md)
@@ -57,6 +63,8 @@ docs/
 ```text
 BLE iBeacon wristband
   -> USB BLE dongle
+  -> Python receiver CLI
+  -> JSONL fallback log
   -> Python local race service
   -> SQLite canonical store
   -> local React admin UI

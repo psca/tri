@@ -87,4 +87,4 @@ Pull requests should include a summary, test evidence, affected docs/specs, and 
 
 ## Architecture Notes
 
-The local Python service is the official timing authority. `tri_timing` is library code, and `tri_timing_service` is the local FastAPI runtime adapter. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP, and D1 is a derived read model. Cloud sync must be idempotent and must not block local timing when the network or ingest endpoint is unavailable. BLE detections are evidence; accepted route events and manual corrections are append-only facts.
+The local Python service is the official timing authority. `tri_timing` is library code, and `tri_timing_service` is the local FastAPI runtime adapter. SQLite is canonical. Cloudflare is spectator/read-only backup for MVP, and D1 is a derived read model. Cloud sync must be idempotent and must not block local timing when the network or ingest endpoint is unavailable. BLE detections are evidence; accepted route events and manual corrections are append-only facts. Manual corrections must not edit or delete accepted events; derive corrected state through review projection.

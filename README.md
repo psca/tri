@@ -24,6 +24,7 @@ Implemented so far:
 - Local React/Vite admin shell.
 - Retrying cloud sync publisher for accepted timing facts.
 - Cloudflare Worker spectator API with authenticated ingest, D1 migrations, and public read endpoints.
+- Manual review/correction design and implementation.
 
 ## Key Documents
 
@@ -33,6 +34,7 @@ Implemented so far:
 - [Cloud spectator sync implementation plan](docs/plans/2026-05-25-cloud-spectator-sync.md)
 - [Local-core acceptance checklist](docs/acceptance/local-core.md)
 - [Cloud spectator acceptance checklist](docs/acceptance/cloud-spectator.md)
+- [Manual review/corrections acceptance checklist](docs/acceptance/manual-review-corrections.md)
 - [Contributor guide](AGENTS.md)
 
 ## Repository Layout

@@ -55,9 +55,10 @@ def build_review_state(
     warnings: list[str] = []
     athlete_ids = {athlete["athlete_id"] for athlete in athletes}
     route_event_ids = {event.id for event in route_events}
-    accepted_by_sequence: dict[int, dict[str, Any]] = {}
+    target_states_by_sequence: dict[int, tuple[str, ReviewTimelineEvent]] = {}
     event_states: dict[tuple[str, str], ReviewTimelineEvent] = {}
 
+    accepted_with_sequence: list[tuple[int, dict[str, Any]]] = []
     for accepted in accepted_events:
         if accepted.get("race_id", race_id) != race_id:
             continue
@@ -65,14 +66,16 @@ def build_review_state(
         if sequence is None:
             warnings.append("ignored accepted event without local sequence number")
             continue
+        accepted_with_sequence.append((sequence, accepted))
+
+    for sequence, accepted in sorted(accepted_with_sequence, key=lambda row: row[0]):
         key = (accepted["athlete_id"], accepted["route_event_id"])
         if key in event_states:
             warnings.append(
                 f"ignored duplicate accepted event {sequence}: {accepted['route_event_id']}"
             )
             continue
-        accepted_by_sequence[sequence] = accepted
-        event_states[key] = ReviewTimelineEvent(
+        event_state = ReviewTimelineEvent(
             route_event_id=accepted["route_event_id"],
             label="",
             status="accepted",
@@ -81,16 +84,24 @@ def build_review_state(
             source="ble",
             accepted_local_sequence_number=sequence,
         )
+        event_states[key] = event_state
+        target_states_by_sequence[sequence] = (accepted["athlete_id"], event_state)
 
     status_by_athlete = {athlete_id: "racing" for athlete_id in athlete_ids}
-    sorted_corrections = sorted(
-        manual_corrections, key=lambda correction: correction.get("local_sequence_number", 0)
-    )
-    for correction in sorted_corrections:
+    corrections_with_sequence: list[tuple[int, dict[str, Any]]] = []
+    for correction in manual_corrections:
         sequence = _sequence_number(correction)
         if sequence is None:
             warnings.append("ignored correction without local sequence number")
             continue
+        corrections_with_sequence.append((sequence, correction))
+
+    sorted_corrections = [
+        correction
+        for _, correction in sorted(corrections_with_sequence, key=lambda row: row[0])
+    ]
+    for correction in sorted_corrections:
+        sequence = int(correction["local_sequence_number"])
         if correction.get("race_id", race_id) != race_id:
             warnings.append(f"ignored correction {sequence}: wrong race")
             continue
@@ -104,13 +115,14 @@ def build_review_state(
             _apply_manual_add_pass(
                 correction=correction,
                 event_states=event_states,
+                target_states_by_sequence=target_states_by_sequence,
                 route_event_ids=route_event_ids,
                 warnings=warnings,
             )
         elif correction_type == "manual_reject_pass":
             _apply_targeted_correction(
                 correction=correction,
-                accepted_by_sequence=accepted_by_sequence,
+                target_states_by_sequence=target_states_by_sequence,
                 event_states=event_states,
                 status="rejected",
                 source="ble",
@@ -119,7 +131,7 @@ def build_review_state(
         elif correction_type == "manual_override_time":
             _apply_manual_override_time(
                 correction=correction,
-                accepted_by_sequence=accepted_by_sequence,
+                target_states_by_sequence=target_states_by_sequence,
                 event_states=event_states,
                 warnings=warnings,
             )
@@ -171,11 +183,15 @@ def _apply_manual_add_pass(
     *,
     correction: dict[str, Any],
     event_states: dict[tuple[str, str], ReviewTimelineEvent],
+    target_states_by_sequence: dict[int, tuple[str, ReviewTimelineEvent]],
     route_event_ids: set[str],
     warnings: list[str],
 ) -> None:
     sequence = int(correction["local_sequence_number"])
     route_event_id = correction.get("route_event_id")
+    if correction.get("corrected_time_wall") is None:
+        warnings.append(f"ignored correction {sequence}: missing corrected time")
+        return
     if route_event_id not in route_event_ids:
         warnings.append(f"ignored correction {sequence}: unknown route event")
         return
@@ -184,7 +200,7 @@ def _apply_manual_add_pass(
     if existing is not None and existing.status != "missing":
         warnings.append(f"ignored correction {sequence}: route event already has a pass")
         return
-    event_states[key] = ReviewTimelineEvent(
+    event_state = ReviewTimelineEvent(
         route_event_id=route_event_id,
         label="",
         status="manual",
@@ -193,12 +209,14 @@ def _apply_manual_add_pass(
         source="manual",
         correction_sequence_numbers=[sequence],
     )
+    event_states[key] = event_state
+    target_states_by_sequence[sequence] = (correction["athlete_id"], event_state)
 
 
 def _apply_targeted_correction(
     *,
     correction: dict[str, Any],
-    accepted_by_sequence: dict[int, dict[str, Any]],
+    target_states_by_sequence: dict[int, tuple[str, ReviewTimelineEvent]],
     event_states: dict[tuple[str, str], ReviewTimelineEvent],
     status: str,
     source: str,
@@ -207,7 +225,7 @@ def _apply_targeted_correction(
     sequence = int(correction["local_sequence_number"])
     target = _target_state(
         correction=correction,
-        accepted_by_sequence=accepted_by_sequence,
+        target_states_by_sequence=target_states_by_sequence,
         event_states=event_states,
         warnings=warnings,
     )
@@ -221,14 +239,14 @@ def _apply_targeted_correction(
 def _apply_manual_override_time(
     *,
     correction: dict[str, Any],
-    accepted_by_sequence: dict[int, dict[str, Any]],
+    target_states_by_sequence: dict[int, tuple[str, ReviewTimelineEvent]],
     event_states: dict[tuple[str, str], ReviewTimelineEvent],
     warnings: list[str],
 ) -> None:
     sequence = int(correction["local_sequence_number"])
     target = _target_state(
         correction=correction,
-        accepted_by_sequence=accepted_by_sequence,
+        target_states_by_sequence=target_states_by_sequence,
         event_states=event_states,
         warnings=warnings,
     )
@@ -248,7 +266,7 @@ def _apply_manual_override_time(
 def _target_state(
     *,
     correction: dict[str, Any],
-    accepted_by_sequence: dict[int, dict[str, Any]],
+    target_states_by_sequence: dict[int, tuple[str, ReviewTimelineEvent]],
     event_states: dict[tuple[str, str], ReviewTimelineEvent],
     warnings: list[str],
 ) -> ReviewTimelineEvent | None:
@@ -257,14 +275,15 @@ def _target_state(
     if target_sequence is None:
         warnings.append(f"ignored correction {sequence}: missing target")
         return None
-    accepted = accepted_by_sequence.get(int(target_sequence))
-    if accepted is None:
+    target_entry = target_states_by_sequence.get(int(target_sequence))
+    if target_entry is None:
         warnings.append(f"ignored correction {sequence}: stale target")
         return None
-    if accepted["athlete_id"] != correction["athlete_id"]:
+    target_athlete_id, target = target_entry
+    if target_athlete_id != correction["athlete_id"]:
         warnings.append(f"ignored correction {sequence}: target athlete mismatch")
         return None
-    return event_states.get((accepted["athlete_id"], accepted["route_event_id"]))
+    return event_states.get((target_athlete_id, target.route_event_id))
 
 
 def _build_review_athletes(

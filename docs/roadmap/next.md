@@ -4,31 +4,34 @@ This is the living queue for near-term work. Keep it short, ordered by risk redu
 
 ## Current Position
 
-The software can run a local race authority, simulate detections, advance ordered route state, review timelines, apply append-only manual corrections, restart cleanly, and sync timing facts toward Cloudflare. The missing bridge is real BLE packet capture from hardware.
+The software can run a local race authority, simulate detections, ingest real iBeacon packets from the Python receiver path, advance ordered route state, review timelines, apply append-only manual corrections, restart cleanly, and sync timing facts toward Cloudflare.
+
+Real hardware validation is still pending. The next work should reduce calibration and race-day workflow risk without adding heavy new product scope.
+
+## Completed Recently
+
+### Real BLE Receiver + Local Detection Ingest + Minimal Receiver Health
+
+Spec: [Real BLE Receiver And Detection Ingest Design](../specs/2026-05-26-real-ble-receiver-ingest-design.md)  
+Plan: [Real BLE Receiver And Detection Ingest Implementation Plan](../plans/2026-05-26-real-ble-receiver-ingest.md)  
+Acceptance: [Real BLE Receiver Acceptance Checklist](../acceptance/real-ble-receiver.md)
+
+Delivered:
+
+- Python `bleak` receiver command: `tri-timing receiver-run`.
+- iBeacon parser for UUID/major/minor/measured power.
+- Local JSONL fallback logging before upload.
+- Receiver upload batching, retry, cancellation flush, and bounded backlog.
+- `POST /api/detections` ingest endpoint.
+- Known beacon raw detection persistence and pass detector feed.
+- Unknown iBeacon health counting without storing race timing evidence.
+- Receiver startup validation for configured `receiver_id`.
+- Receiver health states: `silent`, `online`, `stale`.
+- Admin receiver health panel with polling.
 
 ## Priority Queue
 
-### 1. Real BLE Receiver + Local Detection Ingest + Minimal Receiver Health
-
-**Purpose:** connect actual beacon hardware to the local timing authority.
-
-Spec: [Real BLE Receiver And Detection Ingest Design](../specs/2026-05-26-real-ble-receiver-ingest-design.md)  
-Plan: [Real BLE Receiver And Detection Ingest Implementation Plan](../plans/2026-05-26-real-ble-receiver-ingest.md)
-
-Bundle these together because they form one end-to-end hardware path:
-
-- Python `bleak` scanner loop.
-- iBeacon advertisement parser for UUID/major/minor/RSSI.
-- Known beacon filtering from `athletes.csv`.
-- Receiver config for `receiver_id` and `checkpoint_id`.
-- Local JSONL fallback log.
-- `POST /api/detections` single/batch ingest endpoint.
-- Raw detection persistence and pass detector feed.
-- Minimal admin receiver health: last packet, packet rate, known/unknown beacons, latest RSSI.
-
-Success means one laptop can see real beacons, record raw detections, and advance race state.
-
-### 2. Detection Replay / Calibration Tooling
+### 1. Detection Replay / Calibration Tooling
 
 **Purpose:** tune RSSI thresholds using captured hardware data.
 
@@ -39,7 +42,7 @@ Success means one laptop can see real beacons, record raw detections, and advanc
 
 Success means a hardware walk/run test can produce actionable threshold changes.
 
-### 3. Race-Day Dry Run + Acceptance Hardening
+### 2. Race-Day Dry Run + Acceptance Hardening
 
 **Purpose:** make the operator workflow repeatable before a real event.
 
@@ -49,7 +52,7 @@ Success means a hardware walk/run test can produce actionable threshold changes.
 
 Success means the full workflow can be rehearsed without guessing.
 
-### 4. Cloud Spectator Polish
+### 3. Cloud Spectator Polish
 
 **Purpose:** improve the remote viewing experience after the local authority is reliable.
 
@@ -60,7 +63,7 @@ Success means the full workflow can be rehearsed without guessing.
 
 Do not prioritize this over local BLE reliability.
 
-### 5. Multi-Receiver / Transition Accuracy
+### 4. Multi-Receiver / Transition Accuracy
 
 **Purpose:** improve timing confidence only if single-receiver testing shows gaps.
 
@@ -73,4 +76,4 @@ Defer until one receiver has been tested with real hardware.
 
 ## Near-Term Recommendation
 
-Write the next spec/plan for **Real BLE Receiver + Local Detection Ingest + Minimal Receiver Health**. Keep it narrow: prove live BLE data can enter the system and produce useful timing facts before expanding UI or cloud scope.
+Write the next spec/plan for **Detection Replay / Calibration Tooling**. Keep it narrow: consume the JSONL/SQLite data we now produce, replay detection policy decisions, and make threshold tuning practical once the hardware arrives.

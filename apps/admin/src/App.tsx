@@ -12,6 +12,10 @@ import "./styles.css";
 
 type Mode = "live" | "review";
 type CorrectionType = ManualCorrectionRequest["correction_type"];
+type PendingCorrection = {
+  payload: ManualCorrectionRequest;
+  summary: string[];
+};
 
 const correctionLabels: Record<CorrectionType, string> = {
   manual_add_pass: "Add missing pass",
@@ -31,6 +35,7 @@ export function App() {
   const [status, setStatus] = useState("dnf");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pendingCorrection, setPendingCorrection] = useState<PendingCorrection | null>(null);
 
   useEffect(() => {
     getRaceState().then(setState).catch((err: Error) => setError(err.message));
@@ -81,15 +86,27 @@ export function App() {
     }
   }
 
-  async function sendCorrection() {
+  function stageCorrection() {
     setError(null);
+    setPendingCorrection(null);
 
     if (!selectedAthleteId) {
       setError("Select an athlete before correcting.");
       return;
     }
+    if (correctionType !== "mark_status" && !selectedRouteEventId) {
+      setError("Select a route event before correcting.");
+      return;
+    }
     if (!reason.trim()) {
       setError("Reason is required for manual corrections.");
+      return;
+    }
+    if (
+      (correctionType === "manual_add_pass" || correctionType === "manual_override_time") &&
+      !correctedTime.trim()
+    ) {
+      setError("Corrected time is required for this correction.");
       return;
     }
 
@@ -103,17 +120,41 @@ export function App() {
     };
 
     if (correctionType === "manual_add_pass" || correctionType === "manual_override_time") {
-      payload.corrected_time_wall = correctedTime;
+      payload.corrected_time_wall = correctedTime.trim();
     }
-    if (correctionType === "manual_reject_pass") {
-      payload.target_local_sequence_number = selectedEvent?.accepted_local_sequence_number ?? null;
+    if (correctionType === "manual_reject_pass" || correctionType === "manual_override_time") {
+      payload.target_local_sequence_number = correctionTargetSequence(selectedEvent);
+      if (payload.target_local_sequence_number == null) {
+        setError("Selected event has no accepted or correction sequence to target.");
+        return;
+      }
     }
     if (correctionType === "mark_status") {
-      payload.status = status;
+      payload.status = status === "finished" ? "manual_finished" : status;
+    }
+
+    setPendingCorrection({
+      payload,
+      summary: [
+        `Action: ${correctionLabels[correctionType]}`,
+        `Athlete: ${selectedAthlete?.name ?? selectedAthleteId}`,
+        `Route event: ${correctionType === "mark_status" ? "none" : selectedEvent?.label ?? selectedRouteEventId}`,
+        ...(payload.target_local_sequence_number != null ? [`Target sequence: ${payload.target_local_sequence_number}`] : []),
+        ...(payload.corrected_time_wall ? [`Corrected time: ${payload.corrected_time_wall}`] : []),
+        ...(payload.status ? [`Status: ${payload.status}`] : []),
+        `Reason: ${payload.reason}`,
+      ],
+    });
+  }
+
+  async function confirmCorrection() {
+    if (!pendingCorrection) {
+      return;
     }
 
     try {
-      applyReviewState(await submitCorrection(payload));
+      applyReviewState(await submitCorrection(pendingCorrection.payload));
+      setPendingCorrection(null);
       setReason("");
       await refreshReview();
     } catch (err) {
@@ -129,6 +170,9 @@ export function App() {
     selectedAthlete?.timeline.find((event) => event.route_event_id === selectedRouteEventId) ??
     selectedAthlete?.timeline[0] ??
     null;
+  const needsTarget = correctionType === "manual_reject_pass" || correctionType === "manual_override_time";
+  const targetSequence = correctionTargetSequence(selectedEvent);
+  const submitDisabled = needsTarget && targetSequence == null;
 
   return (
     <main className="shell">
@@ -238,6 +282,8 @@ export function App() {
                 <strong>{event.label}</strong>
                 <span>{event.status}</span>
                 <span>{event.timestamp ?? "No time"}</span>
+                <span>confidence: {event.confidence ?? "none"}</span>
+                <span>source: {event.source}</span>
               </button>
             ))}
           </section>
@@ -247,6 +293,13 @@ export function App() {
             <p>
               {selectedAthlete?.name ?? "No athlete"} · {selectedEvent?.label ?? "No route event"}
             </p>
+            {needsTarget ? (
+              <p className={targetSequence == null ? "hint warn" : "hint"}>
+                {targetSequence == null
+                  ? "No accepted or correction sequence is available for this action."
+                  : `Targets sequence #${targetSequence}`}
+              </p>
+            ) : null}
             <fieldset>
               <legend>Action</legend>
               {(Object.keys(correctionLabels) as CorrectionType[]).map((type) => (
@@ -291,7 +344,49 @@ export function App() {
                 value={reason}
               />
             </label>
-            <button onClick={sendCorrection}>Submit correction</button>
+            <button disabled={submitDisabled} onClick={stageCorrection}>Submit correction</button>
+            {pendingCorrection ? (
+              <section aria-label="Confirm correction" className="confirm-panel">
+                <h3>Confirm correction</h3>
+                <p>Review this plain action summary before submitting.</p>
+                <ul>
+                  {pendingCorrection.summary.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+                <div className="confirm-actions">
+                  <button onClick={confirmCorrection}>Confirm submit</button>
+                  <button className="secondary" onClick={() => setPendingCorrection(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </section>
+            ) : null}
+          </section>
+
+          <section className="panel evidence-panel">
+            <h2>Recent Raw Detections</h2>
+            {reviewState?.raw_detections.length ? (
+              reviewState.raw_detections.map((detection) => (
+                <p key={detection.local_sequence_number}>
+                  #{detection.local_sequence_number} · {detection.receiver_id} · {detection.checkpoint_id} ·{" "}
+                  {detection.rssi} dBm · {detection.timestamp_wall}
+                </p>
+              ))
+            ) : (
+              <p>No raw detections in review state.</p>
+            )}
+          </section>
+
+          <section className="panel evidence-panel">
+            <h2>Correction Log</h2>
+            {reviewState?.correction_log.length ? (
+              reviewState.correction_log.map((entry, index) => (
+                <pre key={index}>{JSON.stringify(entry, null, 2)}</pre>
+              ))
+            ) : (
+              <p>No manual corrections logged.</p>
+            )}
           </section>
         </section>
       )}
@@ -309,6 +404,10 @@ function selectedTimelineEvent(
       .find((athlete) => athlete.athlete_id === athleteId)
       ?.timeline.find((event) => event.route_event_id === routeEventId) ?? null
   );
+}
+
+function correctionTargetSequence(event: ReviewTimelineEvent | null): number | null {
+  return event?.accepted_local_sequence_number ?? event?.correction_sequence_numbers?.[0] ?? null;
 }
 
 function AthleteReviewButton({

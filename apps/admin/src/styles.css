@@ -148,6 +148,25 @@ fieldset input {
   margin-top: 0.25rem;
 }
 
+.receiver-card {
+  border: 1px solid rgba(22, 35, 31, 0.14);
+  border-radius: 18px;
+  margin-top: 0.75rem;
+  padding: 1rem;
+}
+
+.receiver-card.online {
+  border-color: #0d8f63;
+}
+
+.receiver-card.stale {
+  border-color: #d48a16;
+}
+
+.receiver-card.silent {
+  border-color: #b84a35;
+}
+
 .review-grid {
   display: grid;
   gap: 1rem;

@@ -1,6 +1,6 @@
-import type { ManualCorrectionRequest, RaceStateView, ReviewState } from "./types";
+import type { ManualCorrectionRequest, RaceStateView, ReceiverHealthResponse, ReviewState } from "./types";
 
-async function requestState(path: string, init?: RequestInit): Promise<RaceStateView> {
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
@@ -14,19 +14,19 @@ async function requestState(path: string, init?: RequestInit): Promise<RaceState
 }
 
 export function getRaceState(): Promise<RaceStateView> {
-  return requestState("/api/race/state");
+  return requestJson<RaceStateView>("/api/race/state");
 }
 
 export function startRace(): Promise<RaceStateView> {
-  return requestState("/api/race/start", { method: "POST" });
+  return requestJson<RaceStateView>("/api/race/start", { method: "POST" });
 }
 
 export function closeRace(): Promise<RaceStateView> {
-  return requestState("/api/race/close", { method: "POST" });
+  return requestJson<RaceStateView>("/api/race/close", { method: "POST" });
 }
 
 export function sendSyntheticDetection(athleteId: string, checkpointId: string): Promise<RaceStateView> {
-  return requestState("/api/synthetic/detection", {
+  return requestJson<RaceStateView>("/api/synthetic/detection", {
     method: "POST",
     body: JSON.stringify({
       athlete_id: athleteId,
@@ -38,25 +38,16 @@ export function sendSyntheticDetection(athleteId: string, checkpointId: string):
   });
 }
 
-async function requestReview(path: string, init?: RequestInit): Promise<ReviewState> {
-  const response = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json();
+export function getReceiverHealth(): Promise<ReceiverHealthResponse> {
+  return requestJson<ReceiverHealthResponse>("/api/receivers/health");
 }
 
 export function getReviewState(): Promise<ReviewState> {
-  return requestReview("/api/review/state");
+  return requestJson<ReviewState>("/api/review/state");
 }
 
 export function submitCorrection(payload: ManualCorrectionRequest): Promise<ReviewState> {
-  return requestReview("/api/corrections", {
+  return requestJson<ReviewState>("/api/corrections", {
     method: "POST",
     body: JSON.stringify(payload),
   });

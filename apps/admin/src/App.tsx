@@ -2,12 +2,20 @@ import { useEffect, useState } from "react";
 import {
   closeRace,
   getRaceState,
+  getReceiverHealth,
   getReviewState,
   sendSyntheticDetection,
   startRace,
   submitCorrection,
 } from "./api";
-import type { ManualCorrectionRequest, RaceStateView, ReviewAthlete, ReviewState, ReviewTimelineEvent } from "./types";
+import type {
+  ManualCorrectionRequest,
+  RaceStateView,
+  ReceiverHealthResponse,
+  ReviewAthlete,
+  ReviewState,
+  ReviewTimelineEvent,
+} from "./types";
 import "./styles.css";
 
 type Mode = "live" | "review";
@@ -26,6 +34,7 @@ const correctionLabels: Record<CorrectionType, string> = {
 
 export function App() {
   const [state, setState] = useState<RaceStateView | null>(null);
+  const [receiverHealth, setReceiverHealth] = useState<ReceiverHealthResponse | null>(null);
   const [reviewState, setReviewState] = useState<ReviewState | null>(null);
   const [mode, setMode] = useState<Mode>("live");
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
@@ -39,6 +48,7 @@ export function App() {
 
   useEffect(() => {
     getRaceState().then(setState).catch((err: Error) => setError(err.message));
+    getReceiverHealth().then(setReceiverHealth).catch((err: Error) => setError(err.message));
     refreshReview();
   }, []);
 
@@ -234,6 +244,32 @@ export function App() {
               ))
             ) : (
               <p>No accepted events yet.</p>
+            )}
+          </section>
+
+          <section className="panel receiver-health">
+            <h2>Receiver Health</h2>
+            {receiverHealth?.receivers?.length ? (
+              receiverHealth.receivers.map((receiver) => (
+                <article className={`receiver-card ${receiver.status}`} key={receiver.receiver_id}>
+                  <div>
+                    <strong>{receiver.receiver_id}</strong>
+                    <span>{receiver.checkpoint_id}</span>
+                  </div>
+                  <strong>{receiver.status}</strong>
+                  <p>
+                    Known {receiver.known_packets} · Unknown {receiver.unknown_packets}
+                  </p>
+                  <p>Last packet {receiver.last_packet_wall ?? "never"}</p>
+                  {receiver.latest_known_beacons.map((beacon) => (
+                    <p key={`${receiver.receiver_id}-${beacon.athlete_id}`}>
+                      {beacon.athlete_id} · {beacon.rssi} dBm
+                    </p>
+                  ))}
+                </article>
+              ))
+            ) : (
+              <p>No receivers reported yet.</p>
             )}
           </section>
 

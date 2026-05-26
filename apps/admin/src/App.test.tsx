@@ -74,6 +74,71 @@ test("renders Bob and next event from api", async () => {
   expect(screen.getByText("run1_lap1_complete")).toBeInTheDocument();
 });
 
+test("renders receiver health panel", async () => {
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("/api/receivers/health")) {
+      return new Response(
+        JSON.stringify({
+          receivers: [
+            {
+              receiver_id: "laptop-dongle-1",
+              checkpoint_id: "gate",
+              status: "online",
+              last_packet_wall: "2026-05-26T09:00:00+08:00",
+              known_packets: 3,
+              unknown_packets: 1,
+              latest_known_beacons: [
+                {
+                  athlete_id: "A001",
+                  beacon_uuid: "11111111-1111-1111-1111-111111111111",
+                  beacon_major: 1,
+                  beacon_minor: 1,
+                  rssi: -55,
+                  timestamp_wall: "2026-05-26T09:00:00+08:00",
+                },
+              ],
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes("/api/review/state")) {
+      return new Response(
+        JSON.stringify({
+          race_id: "duathlon-demo",
+          phase: "live",
+          route_events: [],
+          athletes: [],
+          correction_log: [],
+          warnings: [],
+          raw_detections: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        race_id: "duathlon-demo",
+        phase: "live",
+        athletes: [],
+        accepted_events: [],
+        raw_detections: [],
+        warnings: [],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("Receiver Health")).toBeInTheDocument();
+  expect(screen.getByText("laptop-dongle-1")).toBeInTheDocument();
+  expect(screen.getByText("online")).toBeInTheDocument();
+  expect(screen.getByText("A001 · -55 dBm")).toBeInTheDocument();
+});
+
 test("subscribes to event stream and applies state messages", async () => {
   render(<App />);
 

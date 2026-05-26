@@ -25,6 +25,29 @@ export type RawDetectionView = {
   timestamp_wall: string;
 };
 
+export type ReceiverBeaconHealthView = {
+  athlete_id: string;
+  beacon_uuid: string;
+  beacon_major: number;
+  beacon_minor: number;
+  rssi: number;
+  timestamp_wall: string;
+};
+
+export type ReceiverHealthView = {
+  receiver_id: string;
+  checkpoint_id: string;
+  status: "online" | "stale" | "silent";
+  last_packet_wall: string | null;
+  known_packets: number;
+  unknown_packets: number;
+  latest_known_beacons: ReceiverBeaconHealthView[];
+};
+
+export type ReceiverHealthResponse = {
+  receivers: ReceiverHealthView[];
+};
+
 export type RaceStateView = {
   race_id: string;
   phase: string;

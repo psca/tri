@@ -133,8 +133,8 @@ test("renders receiver health panel", async () => {
 
   render(<App />);
 
-  expect(await screen.findByText("Receiver Health")).toBeInTheDocument();
-  expect(screen.getByText("laptop-dongle-1")).toBeInTheDocument();
+  expect(await screen.findByText("laptop-dongle-1")).toBeInTheDocument();
+  expect(screen.getByText("Receiver Health")).toBeInTheDocument();
   expect(screen.getByText("online")).toBeInTheDocument();
   expect(screen.getByText("A001 · -55 dBm")).toBeInTheDocument();
 });

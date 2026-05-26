@@ -48,8 +48,16 @@ export function App() {
 
   useEffect(() => {
     getRaceState().then(setState).catch((err: Error) => setError(err.message));
-    getReceiverHealth().then(setReceiverHealth).catch((err: Error) => setError(err.message));
     refreshReview();
+  }, []);
+
+  useEffect(() => {
+    void refreshReceiverHealth();
+    const intervalId = window.setInterval(() => {
+      void refreshReceiverHealth();
+    }, 4000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -81,6 +89,14 @@ export function App() {
   async function refreshReview() {
     try {
       applyReviewState(await getReviewState());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
+  async function refreshReceiverHealth() {
+    try {
+      setReceiverHealth(await getReceiverHealth());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }

@@ -5,6 +5,9 @@ import queue
 import threading
 from collections.abc import Iterator
 
+from pydantic import BaseModel
+
+from tri_timing.review import ReviewState
 from tri_timing_service.models import RaceStateView
 
 
@@ -39,6 +42,14 @@ class EventBroadcaster:
         for subscriber in subscribers:
             subscriber.put_nowait(event)
 
-    def _format_event(self, event: str, state: RaceStateView) -> str:
-        data = json.dumps(state.model_dump(mode="json"))
+    def publish_review(self, review: ReviewState) -> None:
+        event = self._format_event("review_state", review)
+        with self._lock:
+            subscribers = tuple(self._subscribers)
+
+        for subscriber in subscribers:
+            subscriber.put_nowait(event)
+
+    def _format_event(self, event: str, payload: BaseModel) -> str:
+        data = json.dumps(payload.model_dump(mode="json"))
         return f"event: {event}\ndata: {data}\n\n"

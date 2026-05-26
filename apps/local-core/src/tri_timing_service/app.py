@@ -106,7 +106,7 @@ def create_app(
             review = get_runtime().apply_manual_correction(request)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        broadcaster.publish_state(get_runtime().state())
+        broadcaster.publish_review(review)
         return review
 
     return app

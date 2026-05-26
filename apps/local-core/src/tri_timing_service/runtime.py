@@ -21,6 +21,15 @@ from tri_timing_service.settings import ServiceSettings
 from tri_timing_service.sync import SyncPublisher
 
 
+ALLOWED_CORRECTION_TYPES = {
+    "manual_add_pass",
+    "manual_reject_pass",
+    "manual_override_time",
+    "mark_status",
+}
+ALLOWED_MANUAL_STATUSES = {"dnf", "dq", "manual_finished", "racing"}
+
+
 class RaceRuntime:
     def __init__(self, settings: ServiceSettings, database_path: Path) -> None:
         self._settings = settings
@@ -122,9 +131,15 @@ class RaceRuntime:
     def apply_manual_correction(
         self, request: ManualCorrectionRequest
     ) -> ReviewState:
+        if self._phase not in {"live", "closed"}:
+            raise ValueError("corrections are only allowed live or closed")
+
         athlete_ids = {athlete.athlete_id for athlete in self._athletes}
         if request.athlete_id not in athlete_ids:
             raise ValueError(f"unknown athlete: {request.athlete_id}")
+
+        if request.correction_type not in ALLOWED_CORRECTION_TYPES:
+            raise ValueError(f"unknown correction type: {request.correction_type}")
 
         route_event_ids = {event.id for event in self._route}
         if (
@@ -136,20 +151,31 @@ class RaceRuntime:
         if not request.reason.strip():
             raise ValueError("reason is required")
 
-        if request.correction_type in {"manual_reject_pass", "manual_override_time"}:
-            target_sequences = {
-                row["local_sequence_number"]
-                for row in self._store.accepted_route_events()
-                if row["athlete_id"] == request.athlete_id
-            }
-            target_sequences.update(
-                row["local_sequence_number"]
-                for row in self._store.manual_corrections()
-                if row["athlete_id"] == request.athlete_id
-                and row["correction_type"] == "manual_add_pass"
-            )
+        if request.correction_type == "manual_add_pass":
+            if request.route_event_id is None:
+                raise ValueError("route_event_id is required")
+            if request.corrected_time_wall is None:
+                raise ValueError("corrected_time_wall is required")
+
+        elif request.correction_type == "manual_reject_pass":
+            if request.target_local_sequence_number is None:
+                raise ValueError("target_local_sequence_number is required")
+            target_sequences = self._targetable_timeline_sequences(request.athlete_id)
             if request.target_local_sequence_number not in target_sequences:
                 raise ValueError("target event does not exist")
+
+        elif request.correction_type == "manual_override_time":
+            if request.target_local_sequence_number is None:
+                raise ValueError("target_local_sequence_number is required")
+            if request.corrected_time_wall is None:
+                raise ValueError("corrected_time_wall is required")
+            target_sequences = self._targetable_timeline_sequences(request.athlete_id)
+            if request.target_local_sequence_number not in target_sequences:
+                raise ValueError("target event does not exist")
+
+        elif request.correction_type == "mark_status":
+            if request.status not in ALLOWED_MANUAL_STATUSES:
+                raise ValueError(f"unknown status: {request.status}")
 
         self._store.append_manual_correction(
             race_id=self._race_config.race_id,
@@ -164,6 +190,19 @@ class RaceRuntime:
             created_by=request.created_by,
         )
         return self.review_state()
+
+    def _targetable_timeline_sequences(self, athlete_id: str) -> set[int]:
+        target_sequences: set[int] = set()
+        for athlete in self.review_state().athletes:
+            if athlete.athlete_id != athlete_id:
+                continue
+            for event in athlete.timeline:
+                if event.status == "accepted" and event.accepted_local_sequence_number:
+                    target_sequences.add(event.accepted_local_sequence_number)
+                elif event.status == "manual":
+                    target_sequences.update(event.correction_sequence_numbers)
+            break
+        return target_sequences
 
     def start(self) -> RaceStateView:
         if self._phase == "pre_start":

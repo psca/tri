@@ -330,23 +330,29 @@ def test_review_state_endpoint_returns_timelines(tmp_path) -> None:
     assert body["athletes"][0]["timeline"]
 
 
-def test_post_correction_adds_manual_pass_and_publishes_state(
+def test_post_correction_adds_manual_pass_and_publishes_review_state(
     tmp_path, monkeypatch
 ) -> None:
     class FakeBroadcaster:
-        published: list[RaceStateView] = []
+        published_states: list[RaceStateView] = []
+        published_reviews: list[object] = []
 
         def stream(self, initial_state: RaceStateView):
             return iter(())
 
         def publish_state(self, state: RaceStateView) -> None:
-            self.published.append(state)
+            self.published_states.append(state)
+
+        def publish_review(self, review) -> None:
+            self.published_reviews.append(review)
 
     fake = FakeBroadcaster()
     monkeypatch.setattr("tri_timing_service.app.EventBroadcaster", lambda: fake)
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
+        client.post("/api/race/start")
+        state_broadcasts_before_correction = len(fake.published_states)
         response = client.post(
             "/api/corrections",
             json={
@@ -362,7 +368,8 @@ def test_post_correction_adds_manual_pass_and_publishes_state(
 
     assert response.status_code == 200
     assert review["athletes"][0]["timeline"][0]["status"] == "manual"
-    assert fake.published
+    assert fake.published_reviews
+    assert len(fake.published_states) == state_broadcasts_before_correction
 
 
 def test_post_correction_rejects_unknown_athlete(tmp_path) -> None:
@@ -383,10 +390,100 @@ def test_post_correction_rejects_unknown_athlete(tmp_path) -> None:
     assert response.status_code == 400
 
 
+def test_post_correction_rejects_when_race_not_live_or_closed(tmp_path) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "mark_status",
+                "athlete_id": "A001",
+                "status": "dnf",
+                "reason": "Stopped before start",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "corrections are only allowed live or closed"
+
+
+@pytest.mark.parametrize(
+    ("payload", "detail"),
+    [
+        (
+            {
+                "correction_type": "unknown",
+                "athlete_id": "A001",
+                "reason": "Bad type",
+            },
+            "unknown correction type: unknown",
+        ),
+        (
+            {
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "corrected_time_wall": "2026-05-25T09:10:00+08:00",
+                "reason": "Missing route event",
+            },
+            "route_event_id is required",
+        ),
+        (
+            {
+                "correction_type": "manual_add_pass",
+                "athlete_id": "A001",
+                "route_event_id": "run1_lap1_complete",
+                "reason": "Missing corrected time",
+            },
+            "corrected_time_wall is required",
+        ),
+        (
+            {
+                "correction_type": "manual_reject_pass",
+                "athlete_id": "A001",
+                "reason": "Missing target",
+            },
+            "target_local_sequence_number is required",
+        ),
+        (
+            {
+                "correction_type": "manual_override_time",
+                "athlete_id": "A001",
+                "target_local_sequence_number": 1,
+                "reason": "Missing corrected time",
+            },
+            "corrected_time_wall is required",
+        ),
+        (
+            {
+                "correction_type": "mark_status",
+                "athlete_id": "A001",
+                "status": "finished",
+                "reason": "Bad status",
+            },
+            "unknown status: finished",
+        ),
+    ],
+)
+def test_post_correction_rejects_invalid_shapes(
+    tmp_path, payload: dict[str, object], detail: str
+) -> None:
+    app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        response = client.post("/api/corrections", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == detail
+
+
 def test_corrections_endpoint_returns_correction_log(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
+        client.post("/api/race/start")
         client.post(
             "/api/corrections",
             json={
@@ -409,6 +506,7 @@ def test_post_correction_rejects_unknown_route_event(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
+        client.post("/api/race/start")
         response = client.post(
             "/api/corrections",
             json={
@@ -429,6 +527,7 @@ def test_post_correction_rejects_blank_reason(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
+        client.post("/api/race/start")
         response = client.post(
             "/api/corrections",
             json={
@@ -448,6 +547,7 @@ def test_post_correction_rejects_missing_target_event(tmp_path) -> None:
     app = create_app(ServiceSettings.for_tests(), database_path=tmp_path / "race.sqlite")
 
     with TestClient(app) as client:
+        client.post("/api/race/start")
         response = client.post(
             "/api/corrections",
             json={
@@ -455,6 +555,41 @@ def test_post_correction_rejects_missing_target_event(tmp_path) -> None:
                 "athlete_id": "A001",
                 "target_local_sequence_number": 999,
                 "reason": "False positive",
+                "created_by": "operator",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "target event does not exist"
+
+
+def test_post_correction_rejects_target_from_invalid_raw_manual_add(tmp_path) -> None:
+    database_path = tmp_path / "race.sqlite"
+    with EventStore(database_path) as store:
+        stale_target_sequence = store.append_manual_correction(
+            race_id="duathlon-demo",
+            correction_type="manual_add_pass",
+            athlete_id="A001",
+            route_event_id="unknown_event",
+            target_local_sequence_number=None,
+            corrected_time_wall="2026-05-25T09:10:00+08:00",
+            status=None,
+            reason="Legacy invalid row",
+            created_at="2026-05-25T09:11:00+08:00",
+            created_by="operator",
+        )
+
+    app = create_app(ServiceSettings.for_tests(), database_path=database_path)
+
+    with TestClient(app) as client:
+        client.post("/api/race/start")
+        response = client.post(
+            "/api/corrections",
+            json={
+                "correction_type": "manual_reject_pass",
+                "athlete_id": "A001",
+                "target_local_sequence_number": stale_target_sequence,
+                "reason": "Reject invalid legacy row",
                 "created_by": "operator",
             },
         )
